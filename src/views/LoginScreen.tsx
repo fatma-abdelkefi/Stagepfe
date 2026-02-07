@@ -49,42 +49,34 @@ export default function LoginScreen({ navigation }: any) {
   }, []);
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#000000" />
-
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <StatusBar barStyle="light-content" backgroundColor="#3b82f6" />
       <ScrollView
         contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.inner}
-        >
+        <View style={styles.inner}>
           {/* Header with Gradient Background */}
           <LinearGradient
-            colors={['#000000', '#1e3a8a', '#2563eb']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
+            colors={['#3b82f6', '#2563eb', '#1e40af']}
             style={styles.headerGradient}
           >
-            {/* Logo and Title */}
             <Animated.View
               style={[
                 styles.headerContent,
-                {
-                  opacity: fadeAnim,
-                  transform: [{ translateY: slideAnim }],
-                },
+                { opacity: fadeAnim, transform: [{ translateY: slideAnim }] },
               ]}
             >
+              {/* Logo and Title */}
               <View style={styles.logoCircle}>
                 <LinearGradient
-                  colors={['#3b82f6', '#1d4ed8']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
+                  colors={['#60a5fa', '#3b82f6']}
                   style={styles.logoGradient}
                 >
-                  <Ionicons name="hardware-chip-outline" size={32} color="#fff" />
+                  <Ionicons name="business" size={32} color="#FFFFFF" />
                 </LinearGradient>
               </View>
               <Text style={styles.brandName}>SMARTECH</Text>
@@ -96,31 +88,30 @@ export default function LoginScreen({ navigation }: any) {
           <Animated.View
             style={[
               styles.formCard,
-              {
-                opacity: fadeAnim,
-                transform: [{ translateY: slideAnim }],
-              },
+              { opacity: fadeAnim, transform: [{ translateY: slideAnim }] },
             ]}
           >
-            <Text style={styles.formTitle}>Welcome Back</Text>
-            <Text style={styles.formSubtitle}>Sign in to access your dashboard</Text>
+            <Text style={styles.formTitle}>Bienvenue</Text>
+            <Text style={styles.formSubtitle}>
+              Connectez-vous pour accéder à votre tableau de bord
+            </Text>
 
             {/* Username Input */}
             <View style={styles.inputWrapper}>
-              <Text style={styles.label}>Username</Text>
+              <Text style={styles.label}>Nom d'utilisateur</Text>
               <View style={styles.inputContainer}>
                 <Ionicons
                   name="person-outline"
                   size={20}
-                  color="#64748b"
+                  color="#3b82f6"
                   style={styles.inputIcon}
                 />
                 <TextInput
-                  placeholder="Enter your username"
+                  placeholder="Nom d'utilisateur"
                   placeholderTextColor="#94a3b8"
-                  style={styles.textInput}
                   value={username}
                   onChangeText={setUsername}
+                  style={styles.textInput}
                   autoCapitalize="none"
                 />
               </View>
@@ -128,22 +119,21 @@ export default function LoginScreen({ navigation }: any) {
 
             {/* Password Input */}
             <View style={styles.inputWrapper}>
-              <Text style={styles.label}>Password</Text>
+              <Text style={styles.label}>Mot de passe</Text>
               <View style={styles.inputContainer}>
                 <Ionicons
                   name="lock-closed-outline"
                   size={20}
-                  color="#64748b"
+                  color="#3b82f6"
                   style={styles.inputIcon}
                 />
                 <TextInput
-                  placeholder="Enter your password"
+                  placeholder="Mot de passe"
                   placeholderTextColor="#94a3b8"
-                  style={styles.textInput}
-                  secureTextEntry={securePassword}
                   value={password}
                   onChangeText={setPassword}
-                  autoCapitalize="none"
+                  secureTextEntry={securePassword}
+                  style={styles.textInput}
                 />
                 <TouchableOpacity
                   onPress={togglePasswordVisibility}
@@ -158,37 +148,32 @@ export default function LoginScreen({ navigation }: any) {
               </View>
             </View>
 
-            {/* Remember Me & Forgot Password */}
+            {/* Forgot Password */}
             <View style={styles.optionsRow}>
-              <TouchableOpacity style={styles.rememberMe}>
-                <View style={styles.checkbox}>
-                  <Ionicons name="checkmark" size={14} color="#3b82f6" />
-                </View>
-                <Text style={styles.rememberText}>Remember me</Text>
-              </TouchableOpacity>
+              <View />
               <TouchableOpacity>
-                <Text style={styles.forgotText}>Forgot Password?</Text>
+                <Text style={styles.forgotText}>Mot de passe oublié ?</Text>
               </TouchableOpacity>
             </View>
 
             {/* Login Button */}
             <TouchableOpacity
-              style={[styles.loginButton, loading && styles.loginButtonDisabled]}
               onPress={handleLogin}
               disabled={loading}
-              activeOpacity={0.8}
+              style={[
+                styles.loginButton,
+                loading && styles.loginButtonDisabled,
+              ]}
             >
               <LinearGradient
-                colors={['#3b82f6', '#1d4ed8']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
+                colors={['#3b82f6', '#2563eb']}
                 style={styles.gradientButton}
               >
                 {loading ? (
-                  <ActivityIndicator color="#FFFFFF" size="small" />
+                  <ActivityIndicator color="#FFFFFF" />
                 ) : (
                   <>
-                    <Text style={styles.loginButtonText}>Sign In</Text>
+                    <Text style={styles.loginButtonText}>Se connecter</Text>
                     <Ionicons
                       name="arrow-forward"
                       size={20}
@@ -202,15 +187,15 @@ export default function LoginScreen({ navigation }: any) {
 
             {/* Footer */}
             <View style={styles.footer}>
-              <Text style={styles.footerText}>New to Smartech? </Text>
+              <Text style={styles.footerText}>Nouveau sur Smartech ? </Text>
               <TouchableOpacity>
-                <Text style={styles.signUpText}>Create Account</Text>
+                <Text style={styles.signUpText}>Créer un compte</Text>
               </TouchableOpacity>
             </View>
           </Animated.View>
-        </KeyboardAvoidingView>
+        </View>
       </ScrollView>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -323,26 +308,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 24,
-  },
-  rememberMe: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  checkbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: '#3b82f6',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 8,
-    backgroundColor: '#dbeafe',
-  },
-  rememberText: {
-    fontSize: 14,
-    color: '#1e293b',
-    fontWeight: '500',
   },
   forgotText: {
     fontSize: 14,

@@ -1,5 +1,18 @@
 import { useState, useMemo } from 'react';
-import { getWorkOrderDetails } from '../services/workOrdersService';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getWorkOrderDetails } from '../services/workOrderDetailsService';
+
+// ─── Types ───────────────────────────────────────────
+export type ActivityItem = { taskid: string; description?: string; status?: string };
+export type LaborItem = { taskid: string; laborcode?: string; description?: string; labhrs?: number };
+export type MaterialItem = { taskid: string; itemnum?: string; description?: string; quantity?: number };
+export type DocLinkItem = { document?: string; description?: string; createdate?: string; urlname?: string };
+export type WPLaborItem = {
+  taskid: string;
+  laborcode?: string;
+  description?: string;
+  labhrs?: number;
+};
 
 export type WorkOrder = {
   wonum: string;
@@ -9,7 +22,8 @@ export type WorkOrder = {
   location: string;
   asset: string;
   status: string;
-  scheduledStart: string;
+  scheduledStart: string | null;
+  scheduledFinish?: string | null;
   priority: number;
   isDynamic: boolean;
   dynamicJobPlanApplied: boolean;
@@ -17,21 +31,36 @@ export type WorkOrder = {
   completed: boolean;
   isUrgent: boolean;
   cout: number;
-  materialStatusStoreroom?: string;
-  materialStatusDirect?: string;
-  materialStatusPackage?: string;
-  materialStatusLastUpdated?: string;
 
-  // Additional fields from Maximo details
-  actualStart?: string;
-  actualFinish?: string;
+  activities?: ActivityItem[];
+  labor?: LaborItem[];
+  wplabor?: WPLaborItem[];
+  materials?: MaterialItem[];
+  docLinks?: DocLinkItem[];
+  wplabor_collectionref?: string;
+
+  actualStart?: string | null;
+  actualFinish?: string | null;
   parentWo?: string;
   failureClass?: string;
   problemCode?: string;
   workType?: string;
   glAccount?: string;
+  materialStatusStoreroom?: string;
+  materialStatusDirect?: string;
+  materialStatusPackage?: string;
+  materialStatusLastUpdated?: string;
 };
 
+// ─── Helper pour convertir labhrs ─────────────────────
+export const parseLabHrs = (val: string | number | undefined): number => {
+  if (!val) return 0;
+  if (typeof val === 'number') return val;
+  const [h, m] = val.split(':').map(Number);
+  return h + (m ? m / 60 : 0);
+};
+
+// ─── Hook useWorkOrders ─────────────────────────────
 export function useWorkOrders() {
   const [data, setData] = useState<WorkOrder[]>([]);
   const [activeFilter, setActiveFilter] = useState<string>('Tous');
@@ -39,154 +68,100 @@ export function useWorkOrders() {
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [barcodeFilter, setBarcodeFilter] = useState<string | null>(null);
 
-  // Toggle completed state
   const toggleComplete = (wonum: string) => {
     setData(prev =>
-      prev.map(item =>
-        item.wonum === wonum ? { ...item, completed: !item.completed } : item
-      )
+      prev.map(item => (item.wonum === wonum ? { ...item, completed: !item.completed } : item))
     );
   };
 
-  // Format date for display
-  const formatDate = (dateStr: string | Date | undefined) => {
-    // Si vide ou undefined
-    if (!dateStr || dateStr === '') {
-      return 'Date non planifiée';
-    }
-    
-    try {
-      const date = typeof dateStr === 'string' ? new Date(dateStr) : dateStr;
-      
-      // Vérifier si la date est valide
-      if (isNaN(date.getTime())) {
-        return 'Date non planifiée';
-      }
-      
-      return date.toLocaleDateString('fr-FR', { 
-        day: 'numeric', 
-        month: 'short', 
-        year: 'numeric' 
-      });
-    } catch {
-      return 'Date non planifiée';
-    }
+  const formatDate = (dateStr?: string | null) => {
+    if (!dateStr) return 'Non planifié';
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return 'Non planifié';
+    return date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
   };
 
-  // Fetch details for a work order from Maximo
-  const fetchWorkOrderDetails = async (wonum: string, username: string, password: string) => {
-    try {
-      const details = await getWorkOrderDetails(wonum, username, password);
-      if (details) {
-        setData(prev =>
-          prev.map(item =>
-            item.wonum === wonum ? { ...item, ...details } : item
-          )
-        );
-      }
-    } catch (err: any) {
-      console.error('Erreur lors de la récupération des détails du Work Order:', err.message);
-    }
-  };
-
-  // Helper function to check if date is today
-  const isToday = (dateStr: string | undefined) => {
-    if (!dateStr || dateStr === '') return false;
-    try {
-      const date = new Date(dateStr);
-      if (isNaN(date.getTime())) return false;
-      const today = new Date();
-      return (
-        date.getDate() === today.getDate() &&
-        date.getMonth() === today.getMonth() &&
-        date.getFullYear() === today.getFullYear()
-      );
-    } catch {
-      return false;
-    }
-  };
-
-  // Helper function to check if date is in future
-  const isFuture = (dateStr: string | undefined) => {
-    if (!dateStr || dateStr === '') return false;
-    try {
-      const date = new Date(dateStr);
-      if (isNaN(date.getTime())) return false;
-      const today = new Date();
-      today.setHours(0, 0, 0, 0); // Reset time to compare only dates
-      return date > today;
-    } catch {
-      return false;
-    }
-  };
-
-  // Helper function to check if dates match
-  const datesMatch = (date1: Date, date2: string | undefined) => {
-    if (!date2 || date2 === '') return false;
-    try {
-      const itemDate = new Date(date2);
-      if (isNaN(itemDate.getTime())) return false;
-      return (
-        itemDate.getFullYear() === date1.getFullYear() &&
-        itemDate.getMonth() === date1.getMonth() &&
-        itemDate.getDate() === date1.getDate()
-      );
-    } catch {
-      return false;
-    }
-  };
-
-  // Filter work orders based on search, date, barcode, and active filter
   const filteredData = useMemo(() => {
     return data.filter(item => {
-      // Barcode search has the highest priority
-      if (barcodeFilter) return item.barcode === barcodeFilter;
-
-      // Text search (wonum, description, location, asset, status, site)
-      const searchNormalized = search.toLowerCase();
+      if (barcodeFilter && item.barcode !== barcodeFilter) return false;
+      const q = search.toLowerCase().trim();
       const matchesSearch =
-        searchNormalized === '' ||
-        item.wonum.toLowerCase().includes(searchNormalized) ||
-        item.description.toLowerCase().includes(searchNormalized) ||
-        (item.details && item.details.toLowerCase().includes(searchNormalized)) ||
-        item.location.toLowerCase().includes(searchNormalized) ||
-        item.asset.toLowerCase().includes(searchNormalized) ||
-        item.status.toLowerCase().includes(searchNormalized) ||
-        item.site.toLowerCase().includes(searchNormalized);
+        q === '' ||
+        item.wonum.toLowerCase().includes(q) ||
+        item.description.toLowerCase().includes(q) ||
+        item.details.toLowerCase().includes(q) ||
+        item.location.toLowerCase().includes(q) ||
+        item.asset.toLowerCase().includes(q) ||
+        item.status.toLowerCase().includes(q) ||
+        item.site.toLowerCase().includes(q);
 
       if (!matchesSearch) return false;
 
-      // Date filter
-      if (selectedDate) {
-        if (!datesMatch(selectedDate, item.scheduledStart)) return false;
-      }
-
-      // Active filter tabs
       switch (activeFilter) {
-        case 'Tous':
-          return true;
+        case 'Tous': return true;
         case "Aujourd'hui":
-          return isToday(item.scheduledStart);
+          return item.scheduledStart ? new Date(item.scheduledStart).toDateString() === new Date().toDateString() : false;
         case 'À venir':
-          return isFuture(item.scheduledStart);
-        case 'Urgent':
-          return item.isUrgent;
-        case 'Terminés':
-          return item.completed;
-        default:
-          return true;
+          return item.scheduledStart ? new Date(item.scheduledStart) > new Date() : false;
+        case 'Urgent': return item.isUrgent;
+        case 'Terminés': return item.completed;
+        default: return true;
       }
     });
-  }, [data, search, selectedDate, activeFilter, barcodeFilter]);
+  }, [data, search, activeFilter, barcodeFilter]);
 
-  // Count of today's pending tasks
-  const todayCount = useMemo(
-    () =>
-      data.filter(
-        item => isToday(item.scheduledStart) && !item.completed
-      ).length,
-    [data]
-  );
+  const todayCount = useMemo(() => {
+    const todayStr = new Date().toDateString();
+    return data.filter(item => item.scheduledStart && new Date(item.scheduledStart).toDateString() === todayStr && !item.completed).length;
+  }, [data]);
+
+  const fetchWorkOrderDetails = async (wonum: string) => {
+    try {
+      const username = await AsyncStorage.getItem('@username');
+      const password = await AsyncStorage.getItem('@password');
+      if (!username || !password) throw new Error('Identifiants non trouvés');
+
+      const details = await getWorkOrderDetails(wonum, username, password);
+      if (!details || typeof details !== 'object') return;
+
+      const woDetails: WorkOrder = {
+        ...details,
+        activities: (details.activities ?? []).map(a => ({
+          taskid: String(a.taskid ?? ''),
+          description: a.description ?? '',
+          status: a.status ?? '',
+        })),
+        wplabor: (details.wplabor ?? []).map(l => ({
+          taskid: String(l.taskid ?? ''),
+          laborcode: l.laborcode ?? '',
+          description: l.description ?? '',
+          labhrs: parseLabHrs(l.labhrs),
+        })),
+        labor: (details.labor ?? []).map(l => ({
+          taskid: String(l.taskid ?? ''),
+          laborcode: l.laborcode ?? '',
+          description: l.description ?? '',
+          labhrs: parseLabHrs(l.labhrs),
+        })),
+        materials: (details.materials ?? []).map(m => ({
+          taskid: String(m.taskid ?? ''),
+          itemnum: m.itemnum ?? '',
+          description: m.description ?? '',
+          quantity: Number(m.quantity ?? 0),
+        })),
+        docLinks: (details.docLinks ?? []).map(d => ({
+          document: d.document ?? '',
+          description: d.description ?? '',
+          createdate: d.createdate ?? '',
+          urlname: d.urlname ?? '',
+        })),
+      };
+
+      setData(prev => prev.map(item => (item.wonum === wonum ? { ...item, ...woDetails } : item)));
+    } catch (err: any) {
+      console.error('Erreur fetch WO:', err.message);
+    }
+  };
 
   return {
     data,
@@ -198,11 +173,12 @@ export function useWorkOrders() {
     setSearch,
     selectedDate,
     setSelectedDate,
+    barcodeFilter,
+    setBarcodeFilter,
     toggleComplete,
     formatDate,
     todayCount,
-    barcodeFilter,
-    setBarcodeFilter,
     fetchWorkOrderDetails,
+    
   };
 }

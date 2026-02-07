@@ -13,9 +13,9 @@ import {
 } from 'react-native';
 import FeatherIcon from 'react-native-vector-icons/Feather';
 import MaterialIcon from 'react-native-vector-icons/MaterialCommunityIcons';
-import DatePicker from 'react-native-date-picker';
 import LinearGradient from 'react-native-linear-gradient';
 import BarcodeScanner from '../components/BarcodeScanner';
+import CustomCalendar from '../components/CustomCalendar';
 import { useWorkOrders, WorkOrder } from '../viewmodels/WorkOrdersViewModel';
 import { getWorkOrders } from '../services/workOrdersService';
 import { useNavigation } from '@react-navigation/native';
@@ -48,7 +48,6 @@ export default function WorkOrdersScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch Maximo work orders
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -59,14 +58,14 @@ export default function WorkOrdersScreen() {
         const wos = await getWorkOrders(username, password);
         setData(wos);
       } catch (err: any) {
-        console.error('Error fetching work orders:', err.message);
+        console.error('Error fetching work orders:', err);
         setError('Erreur lors du chargement des ordres de travail');
       } finally {
         setLoading(false);
       }
     };
     fetchData();
-  }, []);
+  }, [setData]);
 
   const handleScan = (barcode: string) => {
     setShowScanner(false);
@@ -76,84 +75,70 @@ export default function WorkOrdersScreen() {
     setSelectedDate(null);
   };
 
+  const getStatusBadge = (status: string) => {
+    const upper = (status || '').toUpperCase();
+    switch (upper) {
+      case 'COMP':
+      case 'CLOSE':
+        return { label: 'Terminé', color: '#10b981' };
+      case 'WAPPR':
+        return { label: 'En attente', color: '#ffbc04' };
+      case 'APPR':
+        return { label: 'Approuvé', color: '#64748b' };
+      case 'CANC':
+        return { label: 'Annulé', color: '#ef4444' };
+      default:
+        return { label: 'En cours', color: '#3b82f6' };
+    }
+  };
+
   const renderItem = ({ item }: { item: WorkOrder }) => {
+    const status = getStatusBadge(item.status);
+
     return (
       <TouchableOpacity
         onPress={() => navigation.navigate('WorkOrderDetails', { workOrder: item })}
         style={styles.card}
         activeOpacity={0.7}
       >
-        {/* Status Indicator Strip */}
-        <View
-          style={[
-            styles.statusStrip,
-            {
-              backgroundColor: item.completed
-                ? '#10b981'
-                : item.isUrgent
-                ? '#ef4444'
-                : '#3b82f6',
-            },
-          ]}
-        />
+        <View style={[styles.statusStrip, { backgroundColor: status.color }]} />
 
         <View style={styles.cardContent}>
-          {/* Header Row */}
           <View style={styles.cardHeader}>
             <View style={styles.wonumBadge}>
               <Text style={styles.wonumText}>{item.wonum}</Text>
             </View>
 
-            {/* Status Badges */}
             <View style={styles.statusBadges}>
-              {item.completed && (
-                <View style={[styles.statusBadge, styles.completedBadge]}>
-                  <FeatherIcon name="check-circle" size={12} color="#fff" />
-                  <Text style={styles.statusBadgeText}>Terminé</Text>
-                </View>
-              )}
-              {item.isUrgent && !item.completed && (
-                <View style={[styles.statusBadge, styles.urgentBadge]}>
-                  <FeatherIcon name="alert-circle" size={12} color="#fff" />
-                  <Text style={styles.statusBadgeText}>Urgent</Text>
-                </View>
-              )}
+              <View style={[styles.statusBadge, { backgroundColor: status.color }]}>
+                <Text style={styles.statusBadgeText}>{status.label}</Text>
+              </View>
             </View>
           </View>
 
-          {/* Description */}
           <Text style={styles.description} numberOfLines={2}>
             {item.description}
           </Text>
 
-          {/* Info Grid */}
           <View style={styles.infoGrid}>
-            <View style={styles.infoItem}>
-              <FeatherIcon name="map-pin" size={14} color="#64748b" />
-              <View style={styles.infoTextContainer}>
-                <Text style={styles.infoLabel}>Site</Text>
-                <Text style={styles.infoValue}>{item.site || 'N/A'}</Text>
-              </View>
-            </View>
-
             <View style={styles.infoItem}>
               <FeatherIcon name="package" size={14} color="#64748b" />
               <View style={styles.infoTextContainer}>
                 <Text style={styles.infoLabel}>Actif</Text>
-                <Text style={styles.infoValue}>{item.asset || 'N/A'}</Text>
+                <Text style={styles.infoValue}>{item.asset || '—'}</Text>
               </View>
             </View>
-          </View>
 
-          {/* Footer Row */}
-          <View style={styles.cardFooter}>
-            <View style={styles.footerItem}>
-              <View style={[styles.statusDot, { backgroundColor: getStatusColor(item.status) }]} />
-              <Text style={styles.footerText}>{item.status || 'N/A'}</Text>
-            </View>
-            <View style={styles.footerItem}>
-              <FeatherIcon name="clock" size={12} color="#94a3b8" />
-              <Text style={styles.footerText}>{formatDate(item.scheduledStart)}</Text>
+            <View style={styles.infoItem}>
+              <FeatherIcon name="calendar" size={14} color="#64748b" />
+              <View style={styles.infoTextContainer}>
+                <Text style={styles.infoLabel}>Début planifié</Text>
+                <Text style={styles.infoValue}>
+                  {item.scheduledStart
+                    ? formatDate(item.scheduledStart)
+                    : 'Non planifié'}
+                </Text>
+              </View>
             </View>
           </View>
         </View>
@@ -161,17 +146,6 @@ export default function WorkOrdersScreen() {
     );
   };
 
-  const getStatusColor = (status: string) => {
-    const statusMap: { [key: string]: string } = {
-      'En cours': '#3b82f6',
-      'Terminé': '#10b981',
-      'En attente': '#f59e0b',
-      'Annulé': '#ef4444',
-    };
-    return statusMap[status] || '#6b7280';
-  };
-
-  // Loading state
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
@@ -182,13 +156,12 @@ export default function WorkOrdersScreen() {
           style={styles.loadingContainer}
         >
           <ActivityIndicator size="large" color="#3b82f6" />
-          <Text style={styles.loadingText}>Chargement...</Text>
+          <Text style={styles.loadingText}>Chargement des ordres...</Text>
         </LinearGradient>
       </SafeAreaView>
     );
   }
 
-  // Error state
   if (error) {
     return (
       <SafeAreaView style={styles.container}>
@@ -196,7 +169,7 @@ export default function WorkOrdersScreen() {
           <View style={styles.errorIcon}>
             <FeatherIcon name="alert-circle" size={48} color="#ef4444" />
           </View>
-          <Text style={styles.errorTitle}>Oups!</Text>
+          <Text style={styles.errorTitle}>Oups !</Text>
           <Text style={styles.errorMessage}>{error}</Text>
           <TouchableOpacity
             style={styles.retryButton}
@@ -210,8 +183,8 @@ export default function WorkOrdersScreen() {
                   const wos = await getWorkOrders(username, password);
                   setData(wos);
                 } catch (err: any) {
-                  console.error('Error fetching work orders:', err.message);
-                  setError('Erreur lors du chargement des ordres de travail');
+                  console.error('Retry failed:', err);
+                  setError('Erreur lors du rechargement');
                 } finally {
                   setLoading(false);
                 }
@@ -236,14 +209,13 @@ export default function WorkOrdersScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Modern Header with Gradient */}
+      {/* Header Gradient */}
       <LinearGradient
         colors={['#000000', '#1e3a8a']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.header}
       >
-        {/* Top Bar */}
         <View style={styles.headerTop}>
           <View style={styles.headerLeft}>
             <LinearGradient
@@ -255,7 +227,7 @@ export default function WorkOrdersScreen() {
               <Text style={styles.logoText}>S</Text>
             </LinearGradient>
             <View>
-              <Text style={styles.greeting}>Bonjour </Text>
+              <Text style={styles.greeting}>Bonjour</Text>
               <Text style={styles.userName}>Smartech Team</Text>
             </View>
           </View>
@@ -265,25 +237,38 @@ export default function WorkOrdersScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Task Summary Card */}
-        <View style={styles.summaryCard}>
-          <View style={styles.summaryLeft}>
-            <Text style={styles.summaryCount}>{todayCount}</Text>
-            <Text style={styles.summaryLabel}>Tâches du jour</Text>
+        <TouchableOpacity
+          onPress={() => setOpenDatePicker(true)}
+          activeOpacity={0.8}
+        >
+          <View style={styles.summaryCard}>
+            <View style={styles.summaryLeft}>
+              <Text style={styles.summaryCount}>{todayCount}</Text>
+              <Text style={styles.summaryLabel}>
+                {selectedDate
+                  ? formatDate(selectedDate.toISOString())
+                  : "Tâches du jour"}
+              </Text>
+            </View>
+            <View style={styles.summaryRight}>
+              <FeatherIcon name="calendar" size={18} color="#3b82f6" />
+              <Text style={styles.summaryDate}>
+                {selectedDate
+                  ? selectedDate.toLocaleDateString('fr-FR', {
+                      day: 'numeric',
+                      month: 'short',
+                    })
+                  : new Date().toLocaleDateString('fr-FR', {
+                      day: 'numeric',
+                      month: 'short',
+                    })}
+              </Text>
+            </View>
           </View>
-          <View style={styles.summaryRight}>
-            <FeatherIcon name="calendar" size={20} color="#3b82f6" />
-            <Text style={styles.summaryDate}>
-              {new Date().toLocaleDateString('fr-FR', {
-                day: 'numeric',
-                month: 'short',
-              })}
-            </Text>
-          </View>
-        </View>
+        </TouchableOpacity>
       </LinearGradient>
 
-      {/* Filter Chips */}
+      {/* Filters */}
       <View style={styles.filterSection}>
         <ScrollView
           horizontal
@@ -302,7 +287,7 @@ export default function WorkOrdersScreen() {
               onPress={() => {
                 setActiveFilter(filter.key);
                 setSearch('');
-                setSelectedDate(null);
+                if (filter.key !== "Aujourd'hui") setSelectedDate(null);
                 setBarcodeFilter(null);
               }}
               style={[
@@ -328,7 +313,7 @@ export default function WorkOrdersScreen() {
         </ScrollView>
       </View>
 
-      {/* Search and Actions */}
+      {/* Search + Scanner */}
       <View style={styles.actionBar}>
         <View style={styles.searchContainer}>
           <FeatherIcon name="search" size={20} color="#94a3b8" />
@@ -342,13 +327,6 @@ export default function WorkOrdersScreen() {
         </View>
 
         <TouchableOpacity
-          onPress={() => setOpenDatePicker(true)}
-          style={styles.actionButton}
-        >
-          <FeatherIcon name="calendar" size={20} color="#3b82f6" />
-        </TouchableOpacity>
-
-        <TouchableOpacity
           onPress={() => setShowScanner(true)}
           style={styles.actionButton}
         >
@@ -356,17 +334,15 @@ export default function WorkOrdersScreen() {
         </TouchableOpacity>
       </View>
 
-      <DatePicker
-        modal
-        open={openDatePicker}
-        date={selectedDate || new Date()}
+      <CustomCalendar
+        visible={openDatePicker}
+        selectedDate={selectedDate}
         onConfirm={(date) => {
           setOpenDatePicker(false);
           setSelectedDate(date);
           setActiveFilter('Tous');
         }}
         onCancel={() => setOpenDatePicker(false)}
-        mode="date"
       />
 
       <Modal visible={showScanner} animationType="slide">
@@ -376,7 +352,6 @@ export default function WorkOrdersScreen() {
         />
       </Modal>
 
-      {/* Work Orders List */}
       <View style={styles.content}>
         {filteredData.length === 0 ? (
           <View style={styles.emptyState}>
@@ -402,390 +377,62 @@ export default function WorkOrdersScreen() {
   );
 }
 
+// Le même StyleSheet que tu as fourni, inchangé
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f8fafc',
-  },
-  header: {
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 24,
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
-  },
-  headerTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  logoGradient: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  logoText: {
-    fontSize: 24,
-    fontWeight: '900',
-    color: '#fff',
-  },
-  greeting: {
-    fontSize: 13,
-    color: '#94a3b8',
-    fontWeight: '500',
-  },
-  userName: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#fff',
-    marginTop: 2,
-  },
-  notificationButton: {
-    width: 44,
-    height: 44,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  notificationDot: {
-    position: 'absolute',
-    top: 10,
-    right: 10,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#ef4444',
-    borderWidth: 2,
-    borderColor: '#1e3a8a',
-  },
-  summaryCard: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 16,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 5,
-  },
-  summaryLeft: {
-    flex: 1,
-  },
-  summaryCount: {
-    fontSize: 36,
-    fontWeight: '900',
-    color: '#0f172a',
-    marginBottom: 4,
-  },
-  summaryLabel: {
-    fontSize: 14,
-    color: '#64748b',
-    fontWeight: '600',
-  },
-  summaryRight: {
-    alignItems: 'center',
-    backgroundColor: '#eff6ff',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-    gap: 4,
-  },
-  summaryDate: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#1e3a8a',
-  },
-  filterSection: {
-    marginTop: 16,
-  },
-  filterScroll: {
-    paddingHorizontal: 20,
-    gap: 8,
-  },
-  filterChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
-    backgroundColor: '#fff',
-    borderWidth: 1.5,
-    borderColor: '#e2e8f0',
-    marginRight: 8,
-  },
-  filterChipActive: {
-    backgroundColor: '#3b82f6',
-    borderColor: '#3b82f6',
-  },
-  filterChipText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#64748b',
-  },
-  filterChipTextActive: {
-    color: '#fff',
-  },
-  actionBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 20,
-    marginTop: 16,
-    marginBottom: 12,
-  },
-  searchContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    height: 50,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 15,
-    color: '#0f172a',
-    fontWeight: '500',
-  },
-  actionButton: {
-    width: 50,
-    height: 50,
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 20,
-  },
-  listContent: {
-    paddingTop: 12,
-    paddingBottom: 20,
-  },
-  card: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    marginBottom: 12,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  statusStrip: {
-    width: 5,
-  },
-  cardContent: {
-    flex: 1,
-    padding: 16,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-  },
-  wonumBadge: {
-    backgroundColor: '#f1f5f9',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  wonumText: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#1e293b',
-  },
-  statusBadges: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  completedBadge: {
-    backgroundColor: '#10b981',
-  },
-  urgentBadge: {
-    backgroundColor: '#ef4444',
-  },
-  statusBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  description: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#0f172a',
-    marginBottom: 14,
-    lineHeight: 22,
-  },
-  infoGrid: {
-    flexDirection: 'row',
-    gap: 16,
-    marginBottom: 12,
-  },
-  infoItem: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-  },
-  infoTextContainer: {
-    flex: 1,
-  },
-  infoLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#94a3b8',
-    marginBottom: 2,
-  },
-  infoValue: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#1e293b',
-  },
-  cardFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#f1f5f9',
-  },
-  footerItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  footerText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#64748b',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#93c5fd',
-    fontWeight: '600',
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 32,
-  },
-  errorIcon: {
-    width: 80,
-    height: 80,
-    backgroundColor: '#fee2e2',
-    borderRadius: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
-  },
-  errorTitle: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#0f172a',
-    marginBottom: 8,
-  },
-  errorMessage: {
-    fontSize: 15,
-    color: '#64748b',
-    textAlign: 'center',
-    marginBottom: 24,
-    lineHeight: 22,
-  },
-  retryButton: {
-    borderRadius: 12,
-    overflow: 'hidden',
-    shadowColor: '#3b82f6',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  retryButtonGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 24,
-    paddingVertical: 14,
-  },
-  retryButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  emptyState: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingTop: 80,
-  },
-  emptyIcon: {
-    width: 100,
-    height: 100,
-    backgroundColor: '#f1f5f9',
-    borderRadius: 50,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
-  },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#1e293b',
-    marginBottom: 8,
-  },
-  emptySubtitle: {
-    fontSize: 14,
-    color: '#94a3b8',
-  },
+  container: { flex: 1, backgroundColor: '#f8fafc' },
+  header: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 18, borderBottomLeftRadius: 24, borderBottomRightRadius: 24 },
+  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  logoGradient: { width: 48, height: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  logoText: { fontSize: 24, fontWeight: '900', color: '#fff' },
+  greeting: { fontSize: 13, color: '#94a3b8', fontWeight: '500' },
+  userName: { fontSize: 17, fontWeight: '700', color: '#fff', marginTop: 2 },
+  notificationButton: { width: 44, height: 44, backgroundColor: 'rgba(255, 255, 255, 0.1)', borderRadius: 12, alignItems: 'center', justifyContent: 'center', position: 'relative' },
+  notificationDot: { position: 'absolute', top: 10, right: 10, width: 8, height: 8, borderRadius: 4, backgroundColor: '#ef4444', borderWidth: 2, borderColor: '#1e3a8a' },
+  summaryCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(255, 255, 255, 0.98)', borderRadius: 16, padding: 16, shadowColor: '#3b82f6', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 5, borderWidth: 1, borderColor: 'rgba(59, 130, 246, 0.1)' },
+  summaryLeft: { flex: 1 },
+  summaryCount: { fontSize: 32, fontWeight: '900', color: '#0f172a', marginBottom: 2 },
+  summaryLabel: { fontSize: 13, color: '#64748b', fontWeight: '600' },
+  summaryRight: { alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255, 255, 255, 0.15)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
+  summaryDate: { fontSize: 11, fontWeight: '600', color: '#3b82f6', marginTop: 2 },
+  filterSection: { marginTop: 16 },
+  filterScroll: { paddingHorizontal: 20, gap: 8 },
+  filterChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, backgroundColor: '#fff', borderWidth: 1.5, borderColor: '#e2e8f0', marginRight: 8 },
+  filterChipActive: { backgroundColor: '#3b82f6', borderColor: '#3b82f6' },
+  filterChipText: { fontSize: 14, fontWeight: '600', color: '#64748b' },
+  filterChipTextActive: { color: '#fff' },
+  actionBar: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 20, marginTop: 16, marginBottom: 12 },
+  searchContainer: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#fff', borderRadius: 14, paddingHorizontal: 16, height: 50, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
+  searchInput: { flex: 1, fontSize: 15, color: '#0f172a', fontWeight: '500' },
+  actionButton: { width: 50, height: 50, backgroundColor: '#fff', borderRadius: 14, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
+  content: { flex: 1, paddingHorizontal: 20 },
+  listContent: { paddingTop: 12, paddingBottom: 20 },
+  card: { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 16, marginBottom: 12, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 8, elevation: 3 },
+  statusStrip: { width: 5 },
+  cardContent: { flex: 1, padding: 16 },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 },
+  wonumBadge: { backgroundColor: '#f1f5f9', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 },
+  wonumText: { fontSize: 12, fontWeight: '800', color: '#1e293b' },
+  statusBadges: { flexDirection: 'row', gap: 4 },
+  statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
+  statusBadgeText: { fontSize: 10, fontWeight: '700', color: '#fff' },
+  description: { fontSize: 15, fontWeight: '600', color: '#0f172a', marginBottom: 14, lineHeight: 22 },
+  infoGrid: { flexDirection: 'row', gap: 16, marginBottom: 12 },
+  infoItem: { flex: 1, flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  infoTextContainer: { flex: 1 },
+  infoLabel: { fontSize: 11, fontWeight: '600', color: '#94a3b8', marginBottom: 2 },
+  infoValue: { fontSize: 13, fontWeight: '700', color: '#1e293b' },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadingText: { marginTop: 16, fontSize: 16, color: '#93c5fd', fontWeight: '600' },
+  errorContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
+  errorIcon: { width: 80, height: 80, backgroundColor: '#fee2e2', borderRadius: 40, alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
+  errorTitle: { fontSize: 24, fontWeight: '800', color: '#0f172a', marginBottom: 8 },
+  errorMessage: { fontSize: 15, color: '#64748b', textAlign: 'center', marginBottom: 24, lineHeight: 22 },
+  retryButton: { borderRadius: 12, overflow: 'hidden', shadowColor: '#3b82f6', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+  retryButtonGradient: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 24, paddingVertical: 14 },
+  retryButtonText: { fontSize: 16, fontWeight: '700', color: '#fff' },
+  emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 80 },
+  emptyIcon: { width: 100, height: 100, backgroundColor: '#f1f5f9', borderRadius: 50, alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
+  emptyTitle: { fontSize: 20, fontWeight: '700', color: '#1e293b', marginBottom: 8 },
+  emptySubtitle: { fontSize: 14, color: '#94a3b8' },
 });

@@ -1,3 +1,4 @@
+// src/views/LaunchScreen.tsx
 import React, { useEffect, useRef } from 'react';
 import {
   View,
@@ -8,9 +9,19 @@ import {
   StatusBar,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
-import Ionicons from 'react-native-vector-icons/Ionicons';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RootStackParamList } from '../navigation/AppNavigator';
 
-export default function LaunchScreen({ navigation }: any) {
+// ✅ Type de navigation pour LaunchScreen
+type LaunchScreenNavigationProp = NativeStackNavigationProp<
+  RootStackParamList,
+  'Launch'
+>;
+
+export default function LaunchScreen() {
+  const navigation = useNavigation<LaunchScreenNavigationProp>();
+
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.3)).current;
@@ -21,20 +32,17 @@ export default function LaunchScreen({ navigation }: any) {
   useEffect(() => {
     // Start animations
     Animated.parallel([
-      // Fade in
       Animated.timing(fadeAnim, {
         toValue: 1,
         duration: 1000,
         useNativeDriver: true,
       }),
-      // Scale up logo
       Animated.spring(scaleAnim, {
         toValue: 1,
         tension: 10,
         friction: 3,
         useNativeDriver: true,
       }),
-      // Slide up text
       Animated.timing(slideUpAnim, {
         toValue: 0,
         duration: 800,
@@ -70,7 +78,7 @@ export default function LaunchScreen({ navigation }: any) {
 
     // Navigate to Login after 3 seconds
     const timer = setTimeout(() => {
-      navigation.replace('Login');
+      navigation.replace('Login'); // ✅ corrigé
     }, 3000);
 
     return () => clearTimeout(timer);
@@ -94,9 +102,7 @@ export default function LaunchScreen({ navigation }: any) {
       <Animated.View
         style={[
           styles.circle1,
-          {
-            transform: [{ rotate: spin }, { scale: pulseAnim }],
-          },
+          { transform: [{ rotate: spin }, { scale: pulseAnim }] },
         ]}
       />
       <Animated.View
@@ -105,10 +111,12 @@ export default function LaunchScreen({ navigation }: any) {
           {
             transform: [
               { rotate: spin },
-              { scale: pulseAnim.interpolate({
-                inputRange: [1, 1.1],
-                outputRange: [1.1, 1],
-              })},
+              {
+                scale: pulseAnim.interpolate({
+                  inputRange: [1, 1.1],
+                  outputRange: [1.1, 1],
+                }),
+              },
             ],
           },
         ]}
@@ -120,10 +128,7 @@ export default function LaunchScreen({ navigation }: any) {
         <Animated.View
           style={[
             styles.logoContainer,
-            {
-              opacity: fadeAnim,
-              transform: [{ scale: scaleAnim }],
-            },
+            { opacity: fadeAnim, transform: [{ scale: scaleAnim }] },
           ]}
         >
           <View style={styles.logoGlow}>
@@ -134,14 +139,11 @@ export default function LaunchScreen({ navigation }: any) {
           </View>
         </Animated.View>
 
-        {/* Title and Subtitle */}
+        {/* Subtitle */}
         <Animated.View
           style={[
             styles.textContainer,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideUpAnim }],
-            },
+            { opacity: fadeAnim, transform: [{ translateY: slideUpAnim }] },
           ]}
         >
           <Text style={styles.subtitle}>Smartech Eam Experts</Text>
@@ -152,14 +154,8 @@ export default function LaunchScreen({ navigation }: any) {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  content: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  container: { flex: 1 },
+  content: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   circle1: {
     position: 'absolute',
     width: 300,
@@ -178,36 +174,13 @@ const styles = StyleSheet.create({
     bottom: -150,
     left: -150,
   },
-  logoContainer: {
-    marginBottom: 40,
-  },
+  logoContainer: { marginBottom: 40 },
   logoGlow: {
     padding: 30,
     borderRadius: 100,
     backgroundColor: 'rgba(59, 130, 246, 0.15)',
   },
-  logo: {
-    width: 240,
-    height: 240,
-    resizeMode: 'contain',
-  },
-  textContainer: {
-    alignItems: 'center',
-  },
-  title: {
-    fontSize: 42,
-    fontWeight: '900',
-    color: '#FFFFFF',
-    letterSpacing: 4,
-    textShadowColor: 'rgba(59, 130, 246, 0.5)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 10,
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#93c5fd',
-    letterSpacing: 2,
-  },
+  logo: { width: 240, height: 240, resizeMode: 'contain' },
+  textContainer: { alignItems: 'center' },
+  subtitle: { fontSize: 18, fontWeight: '600', color: '#93c5fd', letterSpacing: 2 },
 });

@@ -1,12 +1,14 @@
+// src/services/workOrderService.ts
 import axios from 'axios';
 import { Buffer } from 'buffer';
 import { WorkOrder } from '../viewmodels/WorkOrdersViewModel';
 
 const BASE_URL = 'http://demo2.smartech-tn.com/maximo/oslc/os/mxwo';
 
-/**
- * Types pour les réponses Maximo
- */
+/* =======================
+   TYPES MAXIMO
+======================= */
+
 interface MaximoResponse {
   member?: any[];
   [key: string]: any;
@@ -16,14 +18,16 @@ interface MaximoWorkOrderItem {
   wonum?: string;
   description?: string;
   location?: string | { location?: string };
+  locationdescription?: string;
   assetnum?: string;
   status?: string;
   priority?: string | number;
   siteid?: string;
-  // Champs de date
+
   scheduledstart?: string;
   targetstart?: string;
   targstartdate?: string;
+  scheduledfinish?: string;
 }
 
 interface MaximoWorkOrderDetails extends MaximoWorkOrderItem {
@@ -36,6 +40,10 @@ interface MaximoWorkOrderDetails extends MaximoWorkOrderItem {
   problemcode?: string;
 }
 
+/* =======================
+   AUTH
+======================= */
+
 function makeMaxAuth(username: string, password: string): string {
   try {
     return btoa(`${username}:${password}`);
@@ -43,6 +51,10 @@ function makeMaxAuth(username: string, password: string): string {
     return Buffer.from(`${username}:${password}`).toString('base64');
   }
 }
+
+/* =======================
+   FETCH LIST (WORK ORDERS)
+======================= */
 
 export async function getWorkOrders(
   username: string,
@@ -58,55 +70,61 @@ export async function getWorkOrders(
       },
       params: {
         lean: 1,
-        'oslc.select': 'wonum,description,location,assetnum,status,priority,siteid,scheduledstart,targetstart,targstartdate',
+        savedQuery: 'WOTRACK:OWNER IS ME', // 🔹 filtre OWNER IS ME
+        'oslc.select':
+          'wonum,description,status,assetnum,location,locationdescription,priority,siteid,scheduledstart,targetstart,targstartdate,scheduledfinish',
         'oslc.pageSize': 100,
       },
       timeout: 30000,
     });
 
-    const data = res.data?.member ?? [];
+    const items: MaximoWorkOrderItem[] = res.data?.member ?? [];
 
-    if (data.length > 0) {
-      console.log('\n=== VÉRIFICATION DATES MAXIMO ===');
-      console.log('Premier WO:', data[0].wonum);
-      console.log('scheduledstart:', data[0].scheduledstart);
-      console.log('targetstart:', data[0].targetstart);
-      console.log('targstartdate:', data[0].targstartdate);
-    }
+    console.log(`[getWorkOrders] ${items.length} WO récupérés`);
 
-    return data.map((item: MaximoWorkOrderItem): WorkOrder => {
-    
-      const scheduledStart = 
-        item.scheduledstart || 
-        item.targetstart || 
-        item.targstartdate || 
-        ''; 
+    return items.map((item): WorkOrder => {
+      const scheduledStart: string | null =
+        item.scheduledstart ||
+        item.targetstart ||
+        item.targstartdate ||
+        null;
 
       return {
         wonum: item.wonum ?? '',
         barcode: item.wonum ?? '',
         description: item.description ?? '',
         details: '',
-        location: typeof item.location === 'object'
-          ? item.location?.location ?? ''
-          : item.location ?? '',
+        location:
+          typeof item.location === 'object' && item.location !== null
+            ? item.location.location ?? item.locationdescription ?? ''
+            : item.locationdescription ?? item.location ?? '',
         asset: item.assetnum ?? '',
         status: item.status ?? '',
-        scheduledStart: scheduledStart, 
+        scheduledStart,
         priority: Number(item.priority ?? 0),
         isDynamic: false,
         dynamicJobPlanApplied: false,
         site: item.siteid ?? '',
-        completed: ['COMP', 'CLOSE'].includes(item.status?.toUpperCase() ?? ''),
+        completed: ['COMP', 'CLOSE'].includes(
+          (item.status ?? '').toUpperCase()
+        ),
         isUrgent: Number(item.priority) === 1,
         cout: 0,
       };
     });
   } catch (error: any) {
-    console.error('Erreur lors de la récupération des work orders:', error.message);
+    console.error('[getWorkOrders] Erreur:', {
+      message: error.message,
+      status: error.response?.status,
+      data: error.response?.data,
+    });
     throw error;
   }
 }
+
+/* =======================
+   FETCH DETAILS (1 WO)
+======================= */
 
 export async function getWorkOrderDetails(
   wonum: string,
@@ -124,34 +142,35 @@ export async function getWorkOrderDetails(
       params: {
         lean: 1,
         'oslc.where': `wonum="${wonum}"`,
-        'oslc.select': 'wonum,description,status,siteid,location,assetnum,worktype,glaccount,actualstart,actualfinish,parent,failclass,problemcode,scheduledstart,targetstart,targstartdate',
+        'oslc.select':
+          'wonum,description,status,siteid,location,locationdescription,assetnum,worktype,glaccount,scheduledstart,targetstart,targstartdate,actualstart,actualfinish,parent,failclass,problemcode',
       },
       timeout: 30000,
     });
 
-    const item: MaximoWorkOrderDetails | undefined = res.data?.member?.[0];
-    
-    if (!item) return null;
+    const item = res.data?.member?.[0] as MaximoWorkOrderDetails | undefined;
 
-    const scheduledStart = 
-      item.scheduledstart || 
-      item.targetstart || 
-      item.targstartdate || 
-      '';
+    if (!item) {
+      console.warn(`[getWorkOrderDetails] Aucun WO trouvé (${wonum})`);
+      return null;
+    }
+
+    const scheduledStart =
+      item.scheduledstart || item.targetstart || item.targstartdate || undefined;
 
     return {
-      wonum: item.wonum,
-      description: item.description,
-      status: item.status,
-      site: item.siteid,
+      wonum: item.wonum ?? '',
+      description: item.description ?? '',
+      status: item.status ?? '',
+      site: item.siteid ?? '',
       location:
-        typeof item.location === 'object'
-          ? item.location?.location
-          : item.location,
-      asset: item.assetnum,
+        typeof item.location === 'object' && item.location !== null
+          ? item.location.location ?? ''
+          : item.location ?? '',
+      asset: item.assetnum ?? '',
       workType: item.worktype,
       glAccount: item.glaccount,
-      scheduledStart: scheduledStart,
+      scheduledStart,
       actualStart: item.actualstart,
       actualFinish: item.actualfinish,
       parentWo: item.parent,
@@ -159,7 +178,11 @@ export async function getWorkOrderDetails(
       problemCode: item.problemcode,
     };
   } catch (error: any) {
-    console.error(`Erreur lors de la récupération des détails du WO ${wonum}:`, error.message);
+    console.error(`[getWorkOrderDetails] Erreur (${wonum})`, {
+      message: error.message,
+      status: error.response?.status,
+      data: error.response?.data,
+    });
     return null;
   }
 }
