@@ -20,27 +20,25 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp, useNavigation } from '@react-navigation/native';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAddMaterialViewModel } from '../viewmodels/AddMaterialViewModel';
+import SuccessModal from '../components/SuccessModal'; 
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'AddMaterial'>;
 type RouteProps = RouteProp<RootStackParamList, 'AddMaterial'>;
 
 export default function AddMaterialScreen({ route }: { route: RouteProps }) {
   const navigation = useNavigation<NavProp>();
-  const { wonum } = route.params;
+
+  const { wonum, workorderid } = route.params;
+  const woKey = workorderid ? String(workorderid) : String(wonum);
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [focusedField, setFocusedField] = useState<string | null>(null);
 
-  // Convert wonum to number safely
-  const workOrderId = Number(wonum);
-  if (isNaN(workOrderId)) {
-    Alert.alert('Erreur', 'Numéro d\'OT invalide');
-    navigation.goBack();
-    return null;
-  }
+  useEffect(() => {
+    console.log('📌 [AddMaterialScreen] route.params =', route.params);
+  }, [route.params]);
 
-  // Fetch credentials
   useEffect(() => {
     const getCredentials = async () => {
       const storedUsername = await AsyncStorage.getItem('@username');
@@ -48,18 +46,16 @@ export default function AddMaterialScreen({ route }: { route: RouteProps }) {
 
       if (!storedUsername || !storedPassword) {
         Alert.alert('Erreur', 'Veuillez vous reconnecter');
-        navigation.replace('Login');
+        navigation.replace('Login' as any);
         return;
       }
 
       setUsername(storedUsername);
       setPassword(storedPassword);
     };
-    getCredentials();
-  }, []);
 
-  // ✅ Pass the siteid here
-  const siteid = 'SITE01'; // <-- Replace with your actual Maximo site ID
+    getCredentials();
+  }, [navigation]);
 
   const {
     description,
@@ -75,16 +71,18 @@ export default function AddMaterialScreen({ route }: { route: RouteProps }) {
     loading,
     message,
     addMaterial,
+
+    // ✅ modal
+    successVisible,
+    successTitle,
+    successMessage,
+    closeSuccess,
   } = useAddMaterialViewModel({
-    workOrderId,
+    woKey,
     username,
-    password, // <- must pass this
+    password,
     onSuccess: () => {
-      setDescription('');
-      setQuantity(undefined);
-      setItemnum('');
-      setLocation('');
-      setBarcode('');
+      // keep as fallback, but success modal already calls onSuccess when OK
       navigation.goBack();
     },
   });
@@ -94,21 +92,22 @@ export default function AddMaterialScreen({ route }: { route: RouteProps }) {
       Alert.alert('Erreur', 'Veuillez remplir tous les champs requis.');
       return;
     }
-
-    console.log('🔹 handleAddMaterial payload:', {
-      description,
-      itemnum,
-      quantity,
-      location,
-      barcode,
-      siteid,
-    });
-
     addMaterial();
   };
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* ✅ Beautiful success popup */}
+      <SuccessModal
+        visible={successVisible}
+        title={successTitle}
+        message={successMessage}
+        onClose={() => {
+            closeSuccess();
+            navigation.goBack();
+}}
+      />
+
       <LinearGradient
         colors={['#3b82f6', '#2563eb', '#1e40af']}
         start={{ x: 0, y: 0 }}
@@ -131,16 +130,12 @@ export default function AddMaterialScreen({ route }: { route: RouteProps }) {
         </View>
       </LinearGradient>
 
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={{ flex: 1 }}
-      >
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <ScrollView
           style={styles.content}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
         >
-          {/* FORM CARD */}
           <View style={styles.formCard}>
             <View style={styles.formHeader}>
               <View style={styles.formIconContainer}>
@@ -153,10 +148,9 @@ export default function AddMaterialScreen({ route }: { route: RouteProps }) {
             </View>
 
             <View style={styles.formBody}>
-              {/* Input fields */}
               <InputField
                 label="Numéro d'article"
-                placeholder="Ex: MAT-001"
+                placeholder="Ex: 0-0514"
                 value={itemnum}
                 onChangeText={setItemnum}
                 icon="hash"
@@ -165,6 +159,7 @@ export default function AddMaterialScreen({ route }: { route: RouteProps }) {
                 onFocus={() => setFocusedField('itemnum')}
                 onBlur={() => setFocusedField(null)}
               />
+
               <InputField
                 label="Description"
                 placeholder="Description du matériel"
@@ -176,13 +171,16 @@ export default function AddMaterialScreen({ route }: { route: RouteProps }) {
                 onFocus={() => setFocusedField('description')}
                 onBlur={() => setFocusedField(null)}
               />
+
               <View style={styles.row}>
                 <View style={styles.halfWidth}>
                   <InputField
                     label="Quantité"
-                    placeholder="0"
+                    placeholder="1"
                     value={quantity?.toString() || ''}
-                    onChangeText={(text: string) => setQuantity(text === '' ? undefined : Number(text))}
+                    onChangeText={(text: string) =>
+                      setQuantity(text === '' ? undefined : Number(text))
+                    }
                     keyboardType="numeric"
                     icon="package"
                     required
@@ -191,10 +189,11 @@ export default function AddMaterialScreen({ route }: { route: RouteProps }) {
                     onBlur={() => setFocusedField(null)}
                   />
                 </View>
+
                 <View style={styles.halfWidth}>
                   <InputField
                     label="Emplacement"
-                    placeholder="Ex: A-12"
+                    placeholder="CENTRAL"
                     value={location}
                     onChangeText={setLocation}
                     icon="map-pin"
@@ -205,36 +204,28 @@ export default function AddMaterialScreen({ route }: { route: RouteProps }) {
                   />
                 </View>
               </View>
+
               <InputField
                 label="Code-barres"
-                placeholder="Scanner ou saisir le code-barres"
+                placeholder="1234567890123"
                 value={barcode}
                 onChangeText={setBarcode}
                 icon="maximize"
                 focused={focusedField === 'barcode'}
                 onFocus={() => setFocusedField('barcode')}
                 onBlur={() => setFocusedField(null)}
-                hasScanner
-                onScanPress={() => Alert.alert('Scanner', 'Fonction de scan à implémenter')}
               />
 
+              {/* ✅ Keep same UI infoBox */}
               {message ? (
                 <View style={styles.infoBox}>
                   <FeatherIcon name="info" size={16} color="#3b82f6" />
                   <Text style={styles.infoText}>{message}</Text>
                 </View>
               ) : null}
-
-              <View style={styles.infoBox}>
-                <FeatherIcon name="info" size={16} color="#3b82f6" />
-                <Text style={styles.infoText}>
-                  Les champs marqués d'un * sont obligatoires
-                </Text>
-              </View>
             </View>
           </View>
 
-          {/* ACTION BUTTONS */}
           <View style={styles.actionsContainer}>
             <TouchableOpacity
               onPress={handleAddMaterial}
@@ -268,8 +259,18 @@ export default function AddMaterialScreen({ route }: { route: RouteProps }) {
   );
 }
 
-// InputField (unchanged)
-const InputField = ({ label, placeholder, value, onChangeText, icon, keyboardType, required, focused, onFocus, onBlur, hasScanner, onScanPress }: any) => (
+const InputField = ({
+  label,
+  placeholder,
+  value,
+  onChangeText,
+  icon,
+  keyboardType,
+  required,
+  focused,
+  onFocus,
+  onBlur,
+}: any) => (
   <View style={styles.fieldContainer}>
     <View style={styles.labelRow}>
       <Text style={styles.label}>{label}</Text>
@@ -289,27 +290,12 @@ const InputField = ({ label, placeholder, value, onChangeText, icon, keyboardTyp
         onFocus={onFocus}
         onBlur={onBlur}
       />
-      {hasScanner && (
-        <TouchableOpacity style={styles.scanButton} onPress={onScanPress} activeOpacity={0.7}>
-          <LinearGradient
-            colors={['#3b82f6', '#2563eb']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.scanButtonGradient}
-          >
-            <FeatherIcon name="camera" size={18} color="#fff" />
-          </LinearGradient>
-        </TouchableOpacity>
-      )}
     </View>
   </View>
 );
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f8fafc',
-  },
+  container: { flex: 1, backgroundColor: '#f8fafc' },
   header: {
     paddingHorizontal: 15,
     paddingTop: 11,
@@ -331,15 +317,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  headerInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
+  headerTitle: { fontSize: 18, fontWeight: '700', color: '#fff' },
+  headerInfo: { flexDirection: 'row', alignItems: 'center' },
   headerInfoItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -349,18 +328,9 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 10,
   },
-  headerInfoText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  content: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: 20,
-    paddingBottom: 40,
-  },
+  headerInfoText: { fontSize: 13, fontWeight: '600', color: '#fff' },
+  content: { flex: 1 },
+  scrollContent: { padding: 20, paddingBottom: 40 },
   formCard: {
     backgroundColor: '#fff',
     borderRadius: 20,
@@ -389,39 +359,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  formTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#0f172a',
-  },
-  formSubtitle: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: '#64748b',
-    marginTop: 2,
-  },
-  formBody: {
-    gap: 0,
-  },
-  fieldContainer: {
-    marginBottom: 20,
-  },
-  labelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#0f172a',
-  },
-  required: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#ef4444',
-    marginLeft: 4,
-  },
+  formTitle: { fontSize: 18, fontWeight: '800', color: '#0f172a' },
+  formSubtitle: { fontSize: 13, fontWeight: '500', color: '#64748b', marginTop: 2 },
+  formBody: { gap: 0 },
+  fieldContainer: { marginBottom: 20 },
+  labelRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  label: { fontSize: 14, fontWeight: '700', color: '#0f172a' },
+  required: { fontSize: 14, fontWeight: '700', color: '#ef4444', marginLeft: 4 },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -431,21 +375,8 @@ const styles = StyleSheet.create({
     borderColor: '#e2e8f0',
     overflow: 'hidden',
   },
-  inputContainerFocused: {
-    borderColor: '#3b82f6',
-    backgroundColor: '#fff',
-    shadowColor: '#3b82f6',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  iconWrapper: {
-    width: 48,
-    height: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  inputContainerFocused: { borderColor: '#3b82f6', backgroundColor: '#fff' },
+  iconWrapper: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   input: {
     flex: 1,
     fontSize: 15,
@@ -454,13 +385,8 @@ const styles = StyleSheet.create({
     paddingRight: 16,
     paddingVertical: 14,
   },
-  row: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  halfWidth: {
-    flex: 1,
-  },
+  row: { flexDirection: 'row', gap: 12 },
+  halfWidth: { flex: 1 },
   infoBox: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -472,24 +398,9 @@ const styles = StyleSheet.create({
     borderLeftColor: '#3b82f6',
     marginTop: 4,
   },
-  infoText: {
-    flex: 1,
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#3b82f6',
-  },
-  actionsContainer: {
-    gap: 12,
-  },
-  addButton: {
-    borderRadius: 14,
-    overflow: 'hidden',
-    shadowColor: '#3b82f6',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
-  },
+  infoText: { flex: 1, fontSize: 13, fontWeight: '600', color: '#3b82f6' },
+  actionsContainer: { gap: 12 },
+  addButton: { borderRadius: 14, overflow: 'hidden' },
   addButtonGradient: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -497,11 +408,7 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 16,
   },
-  addButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#fff',
-  },
+  addButtonText: { fontSize: 16, fontWeight: '700', color: '#fff' },
   cancelButton: {
     alignItems: 'center',
     paddingVertical: 14,
@@ -510,25 +417,5 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e2e8f0',
   },
-  cancelButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#64748b',
-  },
-  scanButton: {
-    marginRight: 8,
-    borderRadius: 10,
-    overflow: 'hidden',
-    shadowColor: '#3b82f6',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  scanButtonGradient: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  cancelButtonText: { fontSize: 15, fontWeight: '600', color: '#64748b' },
 });

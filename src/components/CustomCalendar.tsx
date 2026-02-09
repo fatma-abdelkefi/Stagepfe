@@ -1,14 +1,15 @@
-import React, { useState } from 'react';
+// src/components/CustomCalendar.tsx
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
-  StyleSheet,
   TouchableOpacity,
+  StyleSheet,
   Modal,
+  SafeAreaView,
   ScrollView,
 } from 'react-native';
 import FeatherIcon from 'react-native-vector-icons/Feather';
-import LinearGradient from 'react-native-linear-gradient';
 
 interface CustomCalendarProps {
   visible: boolean;
@@ -23,8 +24,9 @@ export default function CustomCalendar({
   onConfirm,
   onCancel,
 }: CustomCalendarProps) {
-  const [currentDate, setCurrentDate] = useState(selectedDate || new Date());
-  const [selectedDay, setSelectedDay] = useState(selectedDate || new Date());
+  const [currentMonth, setCurrentMonth] = useState(
+    selectedDate || new Date()
+  );
 
   const monthNames = [
     'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
@@ -36,229 +38,227 @@ export default function CustomCalendar({
   const getDaysInMonth = (date: Date) => {
     const year = date.getFullYear();
     const month = date.getMonth();
-    return new Date(year, month + 1, 0).getDate();
-  };
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const daysInMonth = lastDay.getDate();
+    
+    // Get the day of week (0 = Sunday, 1 = Monday, etc.)
+    let firstDayOfWeek = firstDay.getDay();
+    // Convert to Monday = 0, Sunday = 6
+    firstDayOfWeek = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1;
 
-  const getFirstDayOfMonth = (date: Date) => {
-    const year = date.getFullYear();
-    const month = date.getMonth();
-    const firstDay = new Date(year, month, 1).getDay();
-    // Convert Sunday (0) to 7, and shift so Monday is 0
-    return firstDay === 0 ? 6 : firstDay - 1;
-  };
-
-  const generateCalendarDays = () => {
-    const daysInMonth = getDaysInMonth(currentDate);
-    const firstDay = getFirstDayOfMonth(currentDate);
-    const days = [];
-
-    // Previous month days
-    const prevMonthDays = getDaysInMonth(
-      new Date(currentDate.getFullYear(), currentDate.getMonth() - 1)
-    );
-    for (let i = firstDay - 1; i >= 0; i--) {
-      days.push({
-        day: prevMonthDays - i,
-        isCurrentMonth: false,
-        date: new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, prevMonthDays - i),
-      });
+    const days: (number | null)[] = [];
+    
+    // Add empty slots for days before the first day of the month
+    for (let i = 0; i < firstDayOfWeek; i++) {
+      days.push(null);
     }
-
-    // Current month days
+    
+    // Add the days of the month
     for (let i = 1; i <= daysInMonth; i++) {
-      days.push({
-        day: i,
-        isCurrentMonth: true,
-        date: new Date(currentDate.getFullYear(), currentDate.getMonth(), i),
-      });
+      days.push(i);
     }
-
-    // Next month days
-    const remainingDays = 42 - days.length; // 6 rows * 7 days
-    for (let i = 1; i <= remainingDays; i++) {
-      days.push({
-        day: i,
-        isCurrentMonth: false,
-        date: new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, i),
-      });
-    }
-
+    
     return days;
   };
 
-  const isSameDay = (date1: Date, date2: Date) => {
+  const days = useMemo(() => getDaysInMonth(currentMonth), [currentMonth]);
+
+  const isSelectedDate = (day: number | null) => {
+    if (!day || !selectedDate) return false;
+    const checkDate = new Date(
+      currentMonth.getFullYear(),
+      currentMonth.getMonth(),
+      day
+    );
     return (
-      date1.getDate() === date2.getDate() &&
-      date1.getMonth() === date2.getMonth() &&
-      date1.getFullYear() === date2.getFullYear()
+      checkDate.getDate() === selectedDate.getDate() &&
+      checkDate.getMonth() === selectedDate.getMonth() &&
+      checkDate.getFullYear() === selectedDate.getFullYear()
     );
   };
 
-  const isToday = (date: Date) => {
-    return isSameDay(date, new Date());
+  const isToday = (day: number | null) => {
+    if (!day) return false;
+    const today = new Date();
+    const checkDate = new Date(
+      currentMonth.getFullYear(),
+      currentMonth.getMonth(),
+      day
+    );
+    return (
+      checkDate.getDate() === today.getDate() &&
+      checkDate.getMonth() === today.getMonth() &&
+      checkDate.getFullYear() === today.getFullYear()
+    );
   };
 
-  const handlePrevMonth = () => {
-    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1));
+  const handleDayPress = (day: number | null) => {
+    if (!day) return;
+    
+    const selected = new Date(
+      currentMonth.getFullYear(),
+      currentMonth.getMonth(),
+      day
+    );
+    
+    // ✅ Immediately confirm and close
+    setTimeout(() => {
+      onConfirm(selected);
+    }, 200);
   };
 
-  const handleNextMonth = () => {
-    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1));
+  const goToPreviousMonth = () => {
+    setCurrentMonth(
+      new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1)
+    );
   };
 
-  const handleDayPress = (date: Date) => {
-    setSelectedDay(date);
+  const goToNextMonth = () => {
+    setCurrentMonth(
+      new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1)
+    );
   };
 
-  const handleConfirm = () => {
-    onConfirm(selectedDay);
+  const formatDisplayDate = () => {
+    if (!selectedDate) {
+      return new Date().toLocaleDateString('fr-FR', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      });
+    }
+    return selectedDate.toLocaleDateString('fr-FR', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
   };
 
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={onCancel}
-    >
-      <View style={styles.overlay}>
-        <View style={styles.container}>
-          {/* Header */}
-          <View style={styles.header}>
-            <View>
-              <Text style={styles.headerTitle}>Sélectionner une date</Text>
-              <Text style={styles.headerSubtitle}>
-                {selectedDay.toLocaleDateString('fr-FR', {
-                  day: 'numeric',
-                  month: 'long',
-                  year: 'numeric',
-                })}
-              </Text>
-            </View>
-            <TouchableOpacity onPress={onCancel} style={styles.closeButton}>
-              <FeatherIcon name="x" size={24} color="#64748b" />
-            </TouchableOpacity>
-          </View>
-
-          {/* Month Navigator */}
-          <View style={styles.monthNavigator}>
-            <TouchableOpacity onPress={handlePrevMonth} style={styles.navButton}>
-              <FeatherIcon name="chevron-left" size={24} color="#3b82f6" />
-            </TouchableOpacity>
-            <Text style={styles.monthText}>
-              {monthNames[currentDate.getMonth()]} {currentDate.getFullYear()}
-            </Text>
-            <TouchableOpacity onPress={handleNextMonth} style={styles.navButton}>
-              <FeatherIcon name="chevron-right" size={24} color="#3b82f6" />
-            </TouchableOpacity>
-          </View>
-
-          {/* Day Names */}
-          <View style={styles.dayNamesContainer}>
-            {dayNames.map((day) => (
-              <View key={day} style={styles.dayName}>
-                <Text style={styles.dayNameText}>{day}</Text>
+    <Modal visible={visible} animationType="fade" transparent>
+      <View style={styles.modalOverlay}>
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.calendarCard}>
+            {/* Header */}
+            <View style={styles.header}>
+              <View style={styles.headerContent}>
+                <Text style={styles.headerTitle}>Sélectionner une date</Text>
+                <Text style={styles.headerSubtitle}>
+                  {formatDisplayDate()}
+                </Text>
               </View>
-            ))}
-          </View>
+              
+              <TouchableOpacity onPress={onCancel} style={styles.closeButton}>
+                <FeatherIcon name="x" size={20} color="#94a3b8" />
+              </TouchableOpacity>
+            </View>
 
-          {/* Calendar Grid */}
-          <ScrollView style={styles.calendarScroll} showsVerticalScrollIndicator={false}>
+            {/* Month Navigation */}
+            <View style={styles.monthNavigation}>
+              <TouchableOpacity onPress={goToPreviousMonth} style={styles.navButton}>
+                <FeatherIcon name="chevron-left" size={22} color="#3b82f6" />
+              </TouchableOpacity>
+              
+              <Text style={styles.monthText}>
+                {monthNames[currentMonth.getMonth()]} {currentMonth.getFullYear()}
+              </Text>
+              
+              <TouchableOpacity onPress={goToNextMonth} style={styles.navButton}>
+                <FeatherIcon name="chevron-right" size={22} color="#3b82f6" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Day Names */}
+            <View style={styles.dayNamesContainer}>
+              {dayNames.map((name) => (
+                <View key={name} style={styles.dayNameCell}>
+                  <Text style={styles.dayName}>{name}</Text>
+                </View>
+              ))}
+            </View>
+
+            {/* Calendar Grid */}
             <View style={styles.calendarGrid}>
-              {generateCalendarDays().map((item, index) => {
-                const isSelected = isSameDay(item.date, selectedDay);
-                const isTodayDate = isToday(item.date);
-
-                return (
-                  <TouchableOpacity
-                    key={index}
-                    onPress={() => handleDayPress(item.date)}
-                    style={styles.dayContainer}
-                  >
-                    {isSelected ? (
-                      <LinearGradient
-                        colors={['#3b82f6', '#2563eb']}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                        style={styles.selectedDay}
-                      >
-                        <Text style={styles.selectedDayText}>{item.day}</Text>
-                      </LinearGradient>
-                    ) : (
-                      <View
+              {days.map((day, index) => (
+                <TouchableOpacity
+                  key={index}
+                  onPress={() => handleDayPress(day)}
+                  disabled={!day}
+                  style={styles.dayCell}
+                  activeOpacity={0.7}
+                >
+                  {day ? (
+                    <View
+                      style={[
+                        styles.dayButton,
+                        isSelectedDate(day) && styles.dayButtonSelected,
+                        isToday(day) && !isSelectedDate(day) && styles.dayButtonToday,
+                      ]}
+                    >
+                      <Text
                         style={[
-                          styles.day,
-                          !item.isCurrentMonth && styles.otherMonthDay,
-                          isTodayDate && styles.todayDay,
+                          styles.dayText,
+                          isSelectedDate(day) && styles.dayTextSelected,
+                          isToday(day) && !isSelectedDate(day) && styles.dayTextToday,
                         ]}
                       >
-                        <Text
-                          style={[
-                            styles.dayText,
-                            !item.isCurrentMonth && styles.otherMonthDayText,
-                            isTodayDate && styles.todayDayText,
-                          ]}
-                        >
-                          {item.day}
-                        </Text>
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
+                        {day}
+                      </Text>
+                    </View>
+                  ) : (
+                    <View style={styles.dayButton} />
+                  )}
+                </TouchableOpacity>
+              ))}
             </View>
-          </ScrollView>
 
-          {/* Action Buttons */}
-          <View style={styles.actions}>
-            <TouchableOpacity onPress={onCancel} style={styles.cancelButton}>
-              <Text style={styles.cancelButtonText}>Annuler</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={handleConfirm} style={styles.confirmButton}>
-              <LinearGradient
-                colors={['#3b82f6', '#2563eb']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.confirmButtonGradient}
+            {/* Footer */}
+            <View style={styles.footer}>
+              <TouchableOpacity
+                onPress={onCancel}
+                style={styles.cancelButton}
               >
-                <Text style={styles.confirmButtonText}>Confirmer</Text>
-              </LinearGradient>
-            </TouchableOpacity>
+                <Text style={styles.cancelButtonText}>Annuler</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
+        </SafeAreaView>
       </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: {
+  modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
   },
-  container: {
-    width: '100%',
+  modalContainer: {
+    width: '90%',
     maxWidth: 400,
+  },
+  calendarCard: {
     backgroundColor: '#fff',
-    borderRadius: 24,
+    borderRadius: 20,
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.2,
     shadowRadius: 20,
     elevation: 10,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     padding: 20,
     paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9',
+  },
+  headerContent: {
+    flex: 1,
   },
   headerTitle: {
     fontSize: 18,
@@ -267,30 +267,30 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   headerSubtitle: {
-    fontSize: 14,
-    color: '#64748b',
+    fontSize: 13,
     fontWeight: '500',
+    color: '#64748b',
   },
   closeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 32,
+    height: 32,
+    borderRadius: 8,
     backgroundColor: '#f8fafc',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  monthNavigator: {
+  monthNavigation: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingVertical: 12,
   },
   navButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#eff6ff',
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#f8fafc',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -302,110 +302,75 @@ const styles = StyleSheet.create({
   dayNamesContainer: {
     flexDirection: 'row',
     paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9',
+    paddingTop: 12,
+    paddingBottom: 8,
   },
-  dayName: {
+  dayNameCell: {
     flex: 1,
     alignItems: 'center',
   },
-  dayNameText: {
+  dayName: {
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '500',
     color: '#94a3b8',
-  },
-  calendarScroll: {
-    maxHeight: 320,
   },
   calendarGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingBottom: 12,
   },
-  dayContainer: {
-    width: '14.28%',
+  dayCell: {
+    width: '14.28%', // 7 days in a week
     aspectRatio: 1,
     padding: 2,
   },
-  day: {
+  dayButton: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 12,
+    borderRadius: 10,
   },
-  selectedDay: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
-    shadowColor: '#3b82f6',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 3,
+  dayButtonSelected: {
+    backgroundColor: '#3b82f6',
   },
-  todayDay: {
-    backgroundColor: '#eff6ff',
+  dayButtonToday: {
     borderWidth: 2,
     borderColor: '#3b82f6',
   },
-  otherMonthDay: {
-    opacity: 0.3,
-  },
   dayText: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '600',
     color: '#0f172a',
   },
-  selectedDayText: {
-    fontSize: 14,
-    fontWeight: '700',
+  dayTextSelected: {
     color: '#fff',
+    fontWeight: '700',
   },
-  todayDayText: {
+  dayTextToday: {
     color: '#3b82f6',
     fontWeight: '700',
   },
-  otherMonthDayText: {
-    color: '#94a3b8',
-  },
-  actions: {
+  footer: {
     flexDirection: 'row',
+    padding: 16,
+    paddingTop: 12,
     gap: 12,
-    padding: 20,
-    paddingTop: 16,
     borderTopWidth: 1,
     borderTopColor: '#f1f5f9',
   },
   cancelButton: {
     flex: 1,
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: '#f8fafc',
     alignItems: 'center',
-    justifyContent: 'center',
+    paddingVertical: 14,
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
   },
   cancelButtonText: {
     fontSize: 15,
     fontWeight: '700',
     color: '#64748b',
-  },
-  confirmButton: {
-    flex: 1,
-    height: 48,
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  confirmButtonGradient: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  confirmButtonText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#fff',
   },
 });

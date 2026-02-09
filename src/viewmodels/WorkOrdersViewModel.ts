@@ -3,10 +3,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getWorkOrderDetails } from '../services/workOrderDetailsService';
 
 // ─── Types ───────────────────────────────────────────
-export type ActivityItem = { taskid: string; description?: string; status?: string };
+export type ActivityItem = { taskid: string; description?: string; status?: string; labhrs?: number };
 export type LaborItem = { taskid: string; laborcode?: string; description?: string; labhrs?: number };
 export type MaterialItem = { taskid: string; itemnum?: string; description?: string; quantity?: number };
 export type DocLinkItem = { document?: string; description?: string; createdate?: string; urlname?: string };
+
 export type WPLaborItem = {
   taskid: string;
   laborcode?: string;
@@ -21,13 +22,25 @@ export type WorkOrder = {
   details: string;
   location: string;
   asset: string;
+  assetDescription?: string;
   status: string;
+  locationDescription: string;
+  // dates
   scheduledStart: string | null;
   scheduledFinish?: string | null;
+
   priority: number;
   isDynamic: boolean;
   dynamicJobPlanApplied: boolean;
+
+  // ✅ You used "site" historically in your UI
   site: string;
+
+  // ✅ Add Maximo keys needed by AddMaterial / errors
+  siteid?: string;        // Maximo field
+  workorderid?: number;   // Maximo field
+  ishistory?: boolean;    // Maximo field
+
   completed: boolean;
   isUrgent: boolean;
   cout: number;
@@ -46,6 +59,7 @@ export type WorkOrder = {
   problemCode?: string;
   workType?: string;
   glAccount?: string;
+
   materialStatusStoreroom?: string;
   materialStatusDirect?: string;
   materialStatusPackage?: string;
@@ -58,6 +72,13 @@ export const parseLabHrs = (val: string | number | undefined): number => {
   if (typeof val === 'number') return val;
   const [h, m] = val.split(':').map(Number);
   return h + (m ? m / 60 : 0);
+};
+const isSameDay = (d1: Date, d2: Date) => {
+  return (
+    d1.getFullYear() === d2.getFullYear() &&
+    d1.getMonth() === d2.getMonth() &&
+    d1.getDate() === d2.getDate()
+  );
 };
 
 // ─── Hook useWorkOrders ─────────────────────────────
@@ -84,6 +105,7 @@ export function useWorkOrders() {
   const filteredData = useMemo(() => {
     return data.filter(item => {
       if (barcodeFilter && item.barcode !== barcodeFilter) return false;
+
       const q = search.toLowerCase().trim();
       const matchesSearch =
         q === '' ||
@@ -96,7 +118,18 @@ export function useWorkOrders() {
         item.site.toLowerCase().includes(q);
 
       if (!matchesSearch) return false;
+        if (selectedDate) {
+          if (!item.scheduledStart) return false;
 
+          const woDate = new Date(item.scheduledStart);
+          if (
+            woDate.getFullYear() !== selectedDate.getFullYear() ||
+            woDate.getMonth() !== selectedDate.getMonth() ||
+            woDate.getDate() !== selectedDate.getDate()
+          ) {
+            return false;
+          }
+        }
       switch (activeFilter) {
         case 'Tous': return true;
         case "Aujourd'hui":
@@ -108,13 +141,14 @@ export function useWorkOrders() {
         default: return true;
       }
     });
-  }, [data, search, activeFilter, barcodeFilter]);
+  }, [data, search, activeFilter, barcodeFilter, selectedDate]);
 
   const todayCount = useMemo(() => {
     const todayStr = new Date().toDateString();
     return data.filter(item => item.scheduledStart && new Date(item.scheduledStart).toDateString() === todayStr && !item.completed).length;
   }, [data]);
 
+  
   const fetchWorkOrderDetails = async (wonum: string) => {
     try {
       const username = await AsyncStorage.getItem('@username');
@@ -127,33 +161,34 @@ export function useWorkOrders() {
       const woDetails: WorkOrder = {
         ...details,
         activities: (details.activities ?? []).map(a => ({
-          taskid: String(a.taskid ?? ''),
-          description: a.description ?? '',
-          status: a.status ?? '',
+          taskid: String((a as any).taskid ?? ''),
+          description: (a as any).description ?? '',
+          status: (a as any).status ?? '',
+          labhrs: (a as any).labhrs ?? 0,
         })),
         wplabor: (details.wplabor ?? []).map(l => ({
-          taskid: String(l.taskid ?? ''),
-          laborcode: l.laborcode ?? '',
-          description: l.description ?? '',
-          labhrs: parseLabHrs(l.labhrs),
+          taskid: String((l as any).taskid ?? ''),
+          laborcode: (l as any).laborcode ?? '',
+          description: (l as any).description ?? '',
+          labhrs: parseLabHrs((l as any).labhrs),
         })),
         labor: (details.labor ?? []).map(l => ({
-          taskid: String(l.taskid ?? ''),
-          laborcode: l.laborcode ?? '',
-          description: l.description ?? '',
-          labhrs: parseLabHrs(l.labhrs),
+          taskid: String((l as any).taskid ?? ''),
+          laborcode: (l as any).laborcode ?? '',
+          description: (l as any).description ?? '',
+          labhrs: parseLabHrs((l as any).labhrs),
         })),
         materials: (details.materials ?? []).map(m => ({
-          taskid: String(m.taskid ?? ''),
-          itemnum: m.itemnum ?? '',
-          description: m.description ?? '',
-          quantity: Number(m.quantity ?? 0),
+          taskid: String((m as any).taskid ?? ''),
+          itemnum: (m as any).itemnum ?? '',
+          description: (m as any).description ?? '',
+          quantity: Number((m as any).quantity ?? 0),
         })),
         docLinks: (details.docLinks ?? []).map(d => ({
-          document: d.document ?? '',
-          description: d.description ?? '',
-          createdate: d.createdate ?? '',
-          urlname: d.urlname ?? '',
+          document: (d as any).document ?? '',
+          description: (d as any).description ?? '',
+          createdate: (d as any).createdate ?? '',
+          urlname: (d as any).urlname ?? '',
         })),
       };
 
@@ -179,6 +214,5 @@ export function useWorkOrders() {
     formatDate,
     todayCount,
     fetchWorkOrderDetails,
-    
   };
 }

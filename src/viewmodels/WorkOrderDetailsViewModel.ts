@@ -3,7 +3,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getWorkOrderDetails } from '../services/workOrderDetailsService';
 import type { WorkOrder, ActivityItem, LaborItem, MaterialItem, DocLinkItem } from './WorkOrdersViewModel';
 
-// ─── Helper pour convertir labhrs en nombre
 export function parseLabHrs(labhrs: string | number | undefined | null): number {
   if (!labhrs) return 0;
   if (typeof labhrs === 'number') return labhrs;
@@ -11,13 +10,11 @@ export function parseLabHrs(labhrs: string | number | undefined | null): number 
   return parts[0] + (parts[1] ? parts[1] / 60 : 0);
 }
 
-// ─── Hook pour récupérer les détails d’un WorkOrder
 export function useWorkOrderDetails(wonum: string) {
   const [workOrder, setWorkOrder] = useState<WorkOrder | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  // ─── Fonction pour récupérer les détails
   const fetchDetails = useCallback(async () => {
     try {
       setLoading(true);
@@ -30,17 +27,17 @@ export function useWorkOrderDetails(wonum: string) {
       const details = await getWorkOrderDetails(wonum, username, password);
       if (!details || typeof details !== 'object') {
         setWorkOrder(null);
-        setError('Impossible de charger les détails de cet ordre de travail.');
+        setError("Impossible de charger les détails de cet ordre de travail.");
         return;
       }
 
-      // ─── Normaliser les tableaux
       const normalized: WorkOrder = {
         ...details,
         activities: (details.activities ?? []).map((a: any): ActivityItem => ({
           taskid: String(a.taskid ?? ''),
           description: a.description ?? '',
           status: a.status ?? '',
+          labhrs: a.labhrs ?? 0,
         })),
         labor: (details.labor ?? []).map((l: any): LaborItem => ({
           taskid: String(l.taskid ?? ''),
@@ -71,12 +68,10 @@ export function useWorkOrderDetails(wonum: string) {
     }
   }, [wonum]);
 
-  // ─── Exécuter fetchDetails au montage
   useEffect(() => {
     fetchDetails();
   }, [fetchDetails]);
 
-  // ─── Helpers
   const formatDate = (dateStr?: string | null): string => {
     if (!dateStr) return 'Non planifié';
     const date = new Date(dateStr);
@@ -93,7 +88,6 @@ export function useWorkOrderDetails(wonum: string) {
     return diffDays > 0 ? `${diffDays}j ${diffHours % 24}h` : `${diffHours}h`;
   };
 
-  // ─── Fonction refresh
   const refresh = () => fetchDetails();
 
   return { workOrder, loading, error, formatDate, calculateDuration, refresh };

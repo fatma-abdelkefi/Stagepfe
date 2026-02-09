@@ -1,3 +1,4 @@
+// src/views/WorkOrdersScreen.tsx
 import React, { useState, useEffect } from 'react';
 import {
   SafeAreaView,
@@ -10,6 +11,7 @@ import {
   ScrollView,
   Modal,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import FeatherIcon from 'react-native-vector-icons/Feather';
 import MaterialIcon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -21,6 +23,7 @@ import { getWorkOrders } from '../services/workOrdersService';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'WorkOrders'>;
 
@@ -48,22 +51,44 @@ export default function WorkOrdersScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const username = 'YOUR_MAXIMO_USER';
-        const password = 'YOUR_MAXIMO_PASSWORD';
-        const wos = await getWorkOrders(username, password);
-        setData(wos);
-      } catch (err: any) {
-        console.error('Error fetching work orders:', err);
-        setError('Erreur lors du chargement des ordres de travail');
-      } finally {
-        setLoading(false);
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const username = await AsyncStorage.getItem('@username');
+      const password = await AsyncStorage.getItem('@password');
+
+      if (!username || !password) {
+        setError('Veuillez vous connecter (identifiants manquants).');
+        Alert.alert('Session expirée', 'Veuillez vous reconnecter.');
+        navigation.replace('Login' as any);
+        return;
       }
-    };
+
+      const wos = await getWorkOrders(username, password);
+      setData(wos);
+    } catch (err: any) {
+      console.error(
+        'Error fetching work orders:',
+        err?.response?.data || err?.message || err
+      );
+
+      const status = err?.response?.status;
+      if (status === 401) {
+        setError('Accès refusé (401). Vérifiez vos identifiants.');
+        Alert.alert('Erreur 401', 'Identifiants invalides. Veuillez vous reconnecter.');
+        navigation.replace('Login' as any);
+        return;
+      }
+
+      setError('Erreur lors du chargement des ordres de travail');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchData();
   }, [setData]);
 
@@ -97,7 +122,10 @@ export default function WorkOrdersScreen() {
 
     return (
       <TouchableOpacity
-        onPress={() => navigation.navigate('WorkOrderDetails', { workOrder: item })}
+        onPress={() => {
+          console.log('➡️ Navigate details with WO:', item);
+          navigation.navigate('WorkOrderDetails', { workOrder: item });
+        }}
         style={styles.card}
         activeOpacity={0.7}
       >
@@ -120,25 +148,38 @@ export default function WorkOrdersScreen() {
             {item.description}
           </Text>
 
-          <View style={styles.infoGrid}>
-            <View style={styles.infoItem}>
-              <FeatherIcon name="package" size={14} color="#64748b" />
-              <View style={styles.infoTextContainer}>
-                <Text style={styles.infoLabel}>Actif</Text>
-                <Text style={styles.infoValue}>{item.asset || '—'}</Text>
-              </View>
+          {/* Top Row: Asset & Location */}
+          <View style={styles.infoRow}>
+            {/* Asset */}
+            <View style={styles.infoBox}>
+              <Text style={styles.infoLabel}>Actif</Text>
+              <Text style={styles.infoValue} numberOfLines={1}>
+                {item.asset || '—'}
+              </Text>
+              <Text style={styles.infoDescription} numberOfLines={1}>
+                {item.assetDescription || 'Aucune description'}
+              </Text>
             </View>
 
-            <View style={styles.infoItem}>
-              <FeatherIcon name="calendar" size={14} color="#64748b" />
-              <View style={styles.infoTextContainer}>
-                <Text style={styles.infoLabel}>Début planifié</Text>
-                <Text style={styles.infoValue}>
-                  {item.scheduledStart
-                    ? formatDate(item.scheduledStart)
-                    : 'Non planifié'}
-                </Text>
-              </View>
+            {/* Location */}
+            <View style={styles.infoBox}>
+              <Text style={styles.infoLabel}>Emplacement</Text>
+              <Text style={styles.infoValue} numberOfLines={1}>
+                {item.location || '—'}
+              </Text>
+              <Text style={styles.infoDescription} numberOfLines={1}>
+                {item.locationDescription || 'Aucune description'}
+              </Text>
+            </View>
+          </View>
+
+          {/* Bottom Row: Scheduled Start */}
+          <View style={styles.infoRow}>
+            <View style={styles.infoBoxFull}>
+              <Text style={styles.infoLabel}>Début planifié</Text>
+              <Text style={styles.infoValue} numberOfLines={1}>
+                {item.scheduledStart ? formatDate(item.scheduledStart) : 'Non planifié'}
+              </Text>
             </View>
           </View>
         </View>
@@ -171,27 +212,8 @@ export default function WorkOrdersScreen() {
           </View>
           <Text style={styles.errorTitle}>Oups !</Text>
           <Text style={styles.errorMessage}>{error}</Text>
-          <TouchableOpacity
-            style={styles.retryButton}
-            onPress={() => {
-              const fetchData = async () => {
-                try {
-                  setLoading(true);
-                  setError(null);
-                  const username = 'YOUR_MAXIMO_USER';
-                  const password = 'YOUR_MAXIMO_PASSWORD';
-                  const wos = await getWorkOrders(username, password);
-                  setData(wos);
-                } catch (err: any) {
-                  console.error('Retry failed:', err);
-                  setError('Erreur lors du rechargement');
-                } finally {
-                  setLoading(false);
-                }
-              };
-              fetchData();
-            }}
-          >
+
+          <TouchableOpacity style={styles.retryButton} onPress={fetchData}>
             <LinearGradient
               colors={['#3b82f6', '#1d4ed8']}
               start={{ x: 0, y: 0 }}
@@ -231,37 +253,27 @@ export default function WorkOrdersScreen() {
               <Text style={styles.userName}>Smartech Team</Text>
             </View>
           </View>
+
           <TouchableOpacity style={styles.notificationButton}>
             <FeatherIcon name="bell" size={22} color="#fff" />
             <View style={styles.notificationDot} />
           </TouchableOpacity>
         </View>
 
-        <TouchableOpacity
-          onPress={() => setOpenDatePicker(true)}
-          activeOpacity={0.8}
-        >
+        <TouchableOpacity onPress={() => setOpenDatePicker(true)} activeOpacity={0.8}>
           <View style={styles.summaryCard}>
             <View style={styles.summaryLeft}>
               <Text style={styles.summaryCount}>{todayCount}</Text>
               <Text style={styles.summaryLabel}>
-                {selectedDate
-                  ? formatDate(selectedDate.toISOString())
-                  : "Tâches du jour"}
+                {selectedDate ? formatDate(selectedDate.toISOString()) : 'Tâches du jour'}
               </Text>
             </View>
             <View style={styles.summaryRight}>
               <FeatherIcon name="calendar" size={18} color="#3b82f6" />
               <Text style={styles.summaryDate}>
                 {selectedDate
-                  ? selectedDate.toLocaleDateString('fr-FR', {
-                      day: 'numeric',
-                      month: 'short',
-                    })
-                  : new Date().toLocaleDateString('fr-FR', {
-                      day: 'numeric',
-                      month: 'short',
-                    })}
+                  ? selectedDate.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })
+                  : new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}
               </Text>
             </View>
           </View>
@@ -326,10 +338,7 @@ export default function WorkOrdersScreen() {
           />
         </View>
 
-        <TouchableOpacity
-          onPress={() => setShowScanner(true)}
-          style={styles.actionButton}
-        >
+        <TouchableOpacity onPress={() => setShowScanner(true)} style={styles.actionButton}>
           <MaterialIcon name="qrcode-scan" size={22} color="#3b82f6" />
         </TouchableOpacity>
       </View>
@@ -346,10 +355,7 @@ export default function WorkOrdersScreen() {
       />
 
       <Modal visible={showScanner} animationType="slide">
-        <BarcodeScanner
-          onScan={handleScan}
-          onClose={() => setShowScanner(false)}
-        />
+        <BarcodeScanner onScan={handleScan} onClose={() => setShowScanner(false)} />
       </Modal>
 
       <View style={styles.content}>
@@ -359,9 +365,7 @@ export default function WorkOrdersScreen() {
               <FeatherIcon name="inbox" size={48} color="#cbd5e1" />
             </View>
             <Text style={styles.emptyTitle}>Aucun ordre trouvé</Text>
-            <Text style={styles.emptySubtitle}>
-              Essayez de modifier vos filtres
-            </Text>
+            <Text style={styles.emptySubtitle}>Essayez de modifier vos filtres</Text>
           </View>
         ) : (
           <FlatList
@@ -377,62 +381,285 @@ export default function WorkOrdersScreen() {
   );
 }
 
-// Le même StyleSheet que tu as fourni, inchangé
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8fafc' },
-  header: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 18, borderBottomLeftRadius: 24, borderBottomRightRadius: 24 },
-  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
+  header: { 
+    paddingHorizontal: 20, 
+    paddingTop: 12, 
+    paddingBottom: 18, 
+    borderBottomLeftRadius: 24, 
+    borderBottomRightRadius: 24 
+  },
+  headerTop: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    marginBottom: 14 
+  },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  logoGradient: { width: 48, height: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  logoGradient: { 
+    width: 48, 
+    height: 48, 
+    borderRadius: 14, 
+    alignItems: 'center', 
+    justifyContent: 'center' 
+  },
   logoText: { fontSize: 24, fontWeight: '900', color: '#fff' },
   greeting: { fontSize: 13, color: '#94a3b8', fontWeight: '500' },
   userName: { fontSize: 17, fontWeight: '700', color: '#fff', marginTop: 2 },
-  notificationButton: { width: 44, height: 44, backgroundColor: 'rgba(255, 255, 255, 0.1)', borderRadius: 12, alignItems: 'center', justifyContent: 'center', position: 'relative' },
-  notificationDot: { position: 'absolute', top: 10, right: 10, width: 8, height: 8, borderRadius: 4, backgroundColor: '#ef4444', borderWidth: 2, borderColor: '#1e3a8a' },
-  summaryCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(255, 255, 255, 0.98)', borderRadius: 16, padding: 16, shadowColor: '#3b82f6', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 5, borderWidth: 1, borderColor: 'rgba(59, 130, 246, 0.1)' },
+  notificationButton: { 
+    width: 44, 
+    height: 44, 
+    backgroundColor: 'rgba(255, 255, 255, 0.1)', 
+    borderRadius: 12, 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    position: 'relative' 
+  },
+  notificationDot: { 
+    position: 'absolute', 
+    top: 10, 
+    right: 10, 
+    width: 8, 
+    height: 8, 
+    borderRadius: 4, 
+    backgroundColor: '#ef4444', 
+    borderWidth: 2, 
+    borderColor: '#1e3a8a' 
+  },
+  summaryCard: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    backgroundColor: 'rgba(255, 255, 255, 0.98)', 
+    borderRadius: 16, 
+    padding: 16, 
+    shadowColor: '#3b82f6', 
+    shadowOffset: { width: 0, height: 4 }, 
+    shadowOpacity: 0.15, 
+    shadowRadius: 12, 
+    elevation: 5, 
+    borderWidth: 1, 
+    borderColor: 'rgba(59, 130, 246, 0.1)' 
+  },
   summaryLeft: { flex: 1 },
   summaryCount: { fontSize: 32, fontWeight: '900', color: '#0f172a', marginBottom: 2 },
   summaryLabel: { fontSize: 13, color: '#64748b', fontWeight: '600' },
-  summaryRight: { alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255, 255, 255, 0.15)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
+  summaryRight: { 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    backgroundColor: 'rgba(255, 255, 255, 0.15)', 
+    paddingHorizontal: 12, 
+    paddingVertical: 8, 
+    borderRadius: 10 
+  },
   summaryDate: { fontSize: 11, fontWeight: '600', color: '#3b82f6', marginTop: 2 },
   filterSection: { marginTop: 16 },
   filterScroll: { paddingHorizontal: 20, gap: 8 },
-  filterChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, backgroundColor: '#fff', borderWidth: 1.5, borderColor: '#e2e8f0', marginRight: 8 },
+  filterChip: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: 6, 
+    paddingHorizontal: 16, 
+    paddingVertical: 10, 
+    borderRadius: 20, 
+    backgroundColor: '#fff', 
+    borderWidth: 1.5, 
+    borderColor: '#e2e8f0', 
+    marginRight: 8 
+  },
   filterChipActive: { backgroundColor: '#3b82f6', borderColor: '#3b82f6' },
   filterChipText: { fontSize: 14, fontWeight: '600', color: '#64748b' },
   filterChipTextActive: { color: '#fff' },
-  actionBar: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 20, marginTop: 16, marginBottom: 12 },
-  searchContainer: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#fff', borderRadius: 14, paddingHorizontal: 16, height: 50, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
+  actionBar: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: 10, 
+    paddingHorizontal: 20, 
+    marginTop: 16, 
+    marginBottom: 12 
+  },
+  searchContainer: { 
+    flex: 1, 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: 10, 
+    backgroundColor: '#fff', 
+    borderRadius: 14, 
+    paddingHorizontal: 16, 
+    height: 50, 
+    shadowColor: '#000', 
+    shadowOffset: { width: 0, height: 2 }, 
+    shadowOpacity: 0.05, 
+    shadowRadius: 8, 
+    elevation: 2 
+  },
   searchInput: { flex: 1, fontSize: 15, color: '#0f172a', fontWeight: '500' },
-  actionButton: { width: 50, height: 50, backgroundColor: '#fff', borderRadius: 14, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
+  actionButton: { 
+    width: 50, 
+    height: 50, 
+    backgroundColor: '#fff', 
+    borderRadius: 14, 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    shadowColor: '#000', 
+    shadowOffset: { width: 0, height: 2 }, 
+    shadowOpacity: 0.05, 
+    shadowRadius: 8, 
+    elevation: 2 
+  },
   content: { flex: 1, paddingHorizontal: 20 },
   listContent: { paddingTop: 12, paddingBottom: 20 },
-  card: { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 16, marginBottom: 12, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 8, elevation: 3 },
+  
+  // Card Styles
+  card: { 
+    flexDirection: 'row', 
+    backgroundColor: '#fff', 
+    borderRadius: 16, 
+    marginBottom: 12, 
+    overflow: 'hidden', 
+    shadowColor: '#000', 
+    shadowOffset: { width: 0, height: 2 }, 
+    shadowOpacity: 0.08, 
+    shadowRadius: 8, 
+    elevation: 3 
+  },
   statusStrip: { width: 5 },
   cardContent: { flex: 1, padding: 16 },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 },
-  wonumBadge: { backgroundColor: '#f1f5f9', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 },
+  cardHeader: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'flex-start', 
+    marginBottom: 8 
+  },
+  wonumBadge: { 
+    backgroundColor: '#f1f5f9', 
+    paddingHorizontal: 10, 
+    paddingVertical: 4, 
+    borderRadius: 6 
+  },
   wonumText: { fontSize: 12, fontWeight: '800', color: '#1e293b' },
   statusBadges: { flexDirection: 'row', gap: 4 },
-  statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
+  statusBadge: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: 3, 
+    paddingHorizontal: 8, 
+    paddingVertical: 3, 
+    borderRadius: 10 
+  },
   statusBadgeText: { fontSize: 10, fontWeight: '700', color: '#fff' },
-  description: { fontSize: 15, fontWeight: '600', color: '#0f172a', marginBottom: 14, lineHeight: 22 },
-  infoGrid: { flexDirection: 'row', gap: 16, marginBottom: 12 },
-  infoItem: { flex: 1, flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-  infoTextContainer: { flex: 1 },
-  infoLabel: { fontSize: 11, fontWeight: '600', color: '#94a3b8', marginBottom: 2 },
-  infoValue: { fontSize: 13, fontWeight: '700', color: '#1e293b' },
+  description: { 
+    fontSize: 15, 
+    fontWeight: '600', 
+    color: '#0f172a', 
+    marginBottom: 12, 
+    lineHeight: 22 
+  },
+  
+  // Info Grid 2x2 - Smaller boxes
+  infoRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 8,
+  },
+  infoBox: {
+    flex: 1,
+    backgroundColor: '#f8fafc',
+    borderRadius: 10,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  infoBoxFull: {
+    flex: 1,
+    backgroundColor: '#f8fafc',
+    borderRadius: 10,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  infoLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#64748b',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+    marginBottom: 4,
+  },
+  infoValue: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#0f172a',
+    marginBottom: 2,
+  },
+  infoDescription: {
+    fontSize: 10,
+    fontWeight: '500',
+    color: '#64748b',
+    lineHeight: 13,
+  },
+  
+  // Loading & Error States
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadingText: { marginTop: 16, fontSize: 16, color: '#93c5fd', fontWeight: '600' },
-  errorContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
-  errorIcon: { width: 80, height: 80, backgroundColor: '#fee2e2', borderRadius: 40, alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
+  errorContainer: { 
+    flex: 1, 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    padding: 32 
+  },
+  errorIcon: { 
+    width: 80, 
+    height: 80, 
+    backgroundColor: '#fee2e2', 
+    borderRadius: 40, 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    marginBottom: 20 
+  },
   errorTitle: { fontSize: 24, fontWeight: '800', color: '#0f172a', marginBottom: 8 },
-  errorMessage: { fontSize: 15, color: '#64748b', textAlign: 'center', marginBottom: 24, lineHeight: 22 },
-  retryButton: { borderRadius: 12, overflow: 'hidden', shadowColor: '#3b82f6', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
-  retryButtonGradient: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 24, paddingVertical: 14 },
+  errorMessage: { 
+    fontSize: 15, 
+    color: '#64748b', 
+    textAlign: 'center', 
+    marginBottom: 24, 
+    lineHeight: 22 
+  },
+  retryButton: { 
+    borderRadius: 12, 
+    overflow: 'hidden', 
+    shadowColor: '#3b82f6', 
+    shadowOffset: { width: 0, height: 4 }, 
+    shadowOpacity: 0.3, 
+    shadowRadius: 8, 
+    elevation: 4 
+  },
+  retryButtonGradient: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: 8, 
+    paddingHorizontal: 24, 
+    paddingVertical: 14 
+  },
   retryButtonText: { fontSize: 16, fontWeight: '700', color: '#fff' },
-  emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 80 },
-  emptyIcon: { width: 100, height: 100, backgroundColor: '#f1f5f9', borderRadius: 50, alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
+  
+  // Empty State
+  emptyState: { 
+    flex: 1, 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    paddingTop: 80 
+  },
+  emptyIcon: { 
+    width: 100, 
+    height: 100, 
+    backgroundColor: '#f1f5f9', 
+    borderRadius: 50, 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    marginBottom: 20 
+  },
   emptyTitle: { fontSize: 20, fontWeight: '700', color: '#1e293b', marginBottom: 8 },
   emptySubtitle: { fontSize: 14, color: '#94a3b8' },
 });

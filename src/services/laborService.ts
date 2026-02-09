@@ -1,48 +1,59 @@
+// src/services/laborService.ts
 import axios from 'axios';
 import { Buffer } from 'buffer';
 
-export interface Labor {
+export interface LaborInput {
   laborcode: string;
-  wonum: string;
-  siteid: string;
   laborhrs: number;
+  quantity?: number;
 }
 
-const BASE_URL = 'http://demo2.smartech-tn.com/maximo/oslc/os/mxwplabor';
+export async function addLaborToWorkOrder(params: {
+  workorderid: number;
+  siteid?: string;
+  username: string;
+  password: string;
+  labor: LaborInput;
+}) {
+  const { workorderid, siteid, username, password, labor } = params;
 
-export async function addLaborToWorkOrder(
-  labor: Labor,
-  username: string,
-  password: string
-) {
   const token = Buffer.from(`${username}:${password}`).toString('base64');
 
-  console.log('🔹 Labor payload:', labor);
-  console.log('🔹 Headers:', {
+  const url = `http://demo2.smartech-tn.com/maximo/oslc/os/SM1120/${workorderid}?lean=1`;
+
+  const body = {
+    wplabor: [
+      {
+        // ✅ REQUIRED by Maximo for MERGE on this object structure
+        wplaborid: String(Date.now()),
+
+        laborcode: labor.laborcode,
+        laborhrs: labor.laborhrs,
+        quantity: labor.quantity ?? 1,
+        ...(siteid ? { siteid } : {}),
+      },
+    ],
+  };
+
+  const headers = {
     Accept: 'application/json',
     'Content-Type': 'application/json',
-    MAXAUTH: token,
+    maxauth: `Basic ${token}`,
+    properties: '*',
     'x-method-override': 'PATCH',
     patchtype: 'MERGE',
-    properties: '*',
-  });
+  };
+
+  console.log('🚀 [addLabor] URL:', url);
+  console.log('🚀 [addLabor] Headers:', headers);
+  console.log('🚀 [addLabor] Body:', body);
 
   try {
-    const response = await axios.post(BASE_URL, labor, {
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        MAXAUTH: token,
-        'x-method-override': 'PATCH',
-        patchtype: 'MERGE',
-        properties: '*',
-      },
-    });
-
-    console.log('✅ Labor response:', response.data);
+    const response = await axios.post(url, body, { headers });
+    console.log('✅ [addLabor] Response:', response.status, response.data);
     return response.data;
   } catch (error: any) {
-    console.error('❌ Labor error:', error.response?.data || error.message);
+    console.error('❌ [addLabor] Error:', error?.response?.data || error?.message);
     throw error;
   }
 }

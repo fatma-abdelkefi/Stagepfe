@@ -1,4 +1,3 @@
-// src/services/workOrderDetailsService.ts
 import axios from 'axios';
 import { Buffer } from 'buffer';
 import type { WorkOrder } from '../viewmodels/WorkOrdersViewModel';
@@ -18,10 +17,6 @@ export const parseLabHrs = (val: string | number | undefined): number => {
   return p.length === 2 ? p[0] + p[1] / 60 : Number(val) || 0;
 };
 
-/* =======================
-   TYPES MAXIMO
-======================= */
-
 interface MaximoWorkOrderItem {
   wonum?: string;
   description?: string;
@@ -31,20 +26,23 @@ interface MaximoWorkOrderItem {
   locationdescription?: string;
   priority?: number | string;
   siteid?: string;
+
+  // ✅ add
+  workorderid?: number;
+  ishistory?: boolean;
+
   scheduledstart?: string;
   scheduledfinish?: string;
+
   woactivity?: any | any[];
   wplabor?: any | any[];
   wpmaterial?: any | any[];
+  doclinks?: any;
 }
 
 interface MaximoResponse {
   member?: MaximoWorkOrderItem[];
 }
-
-/* =======================
-   MAIN FUNCTION
-======================= */
 
 export async function getWorkOrderDetails(
   wonum: string,
@@ -65,55 +63,70 @@ export async function getWorkOrderDetails(
         'oslc.where': `wonum="${wonum}"`,
         'oslc.pageSize': 1,
         'oslc.select':
-          'wonum,description,status,assetnum,location,locationdescription,priority,siteid,' +
-          'scheduledstart,scheduledfinish,woactivity{taskid,description,status,labhrs},' +
+          'wonum,description,status,assetnum,location,locationdescription,priority,siteid,workorderid,ishistory,' +
+          'scheduledstart,scheduledfinish,' +
+          'woactivity{taskid,description,status,labhrs},' +
           'wplabor{taskid,laborcode,description,labhrs,regularhrs,laborhrs},' +
           'wpmaterial{taskid,itemnum,description,itemqty},' +
           'doclinks',
       },
     });
 
-    // ✅ Ici TypeScript sait que member existe
     if (!res.data.member?.length) return null;
 
     const item = res.data.member[0];
 
     const wo: WorkOrder = {
       wonum: item.wonum ?? wonum,
-      barcode: '',
+      barcode: item.wonum ?? wonum,
       description: item.description ?? '',
       details: '',
       location:
-        typeof item.location === 'string' ? item.location : item.location?.location ?? '',
+        typeof item.location === 'string' ? item.location : item.location?.location ?? item.locationdescription ?? '',
       asset: item.assetnum ?? '',
       status: item.status ?? '',
+
       scheduledStart: item.scheduledstart ?? null,
       scheduledFinish: item.scheduledfinish ?? null,
+
       priority: Number(item.priority ?? 0),
       isDynamic: false,
       dynamicJobPlanApplied: false,
+
+      // ✅ keep old UI field
       site: item.siteid ?? '',
-      completed: false,
-      isUrgent: false,
+
+      // ✅ new fields required by your AddMaterial navigation
+      siteid: item.siteid ?? undefined,
+      workorderid: item.workorderid ?? undefined,
+      ishistory: item.ishistory ?? undefined,
+
+      completed: ['COMP', 'CLOSE'].includes((item.status ?? '').toUpperCase()),
+      isUrgent: Number(item.priority) === 1,
       cout: 0,
+
       activities: toArray(item.woactivity).map(a => ({
         taskid: String(a?.taskid ?? ''),
         description: a?.description ?? '',
         status: a?.status ?? '',
         labhrs: parseLabHrs(a?.labhrs),
       })),
+
       labor: toArray(item.wplabor).map(l => ({
         taskid: String(l?.taskid ?? ''),
         laborcode: l?.laborcode ?? '',
         description: l?.description ?? '',
         labhrs: parseLabHrs(l?.labhrs ?? l?.regularhrs ?? l?.laborhrs),
       })),
+
       materials: toArray(item.wpmaterial).map(m => ({
         taskid: String(m?.taskid ?? ''),
         itemnum: m?.itemnum ?? '',
         description: m?.description ?? '',
         quantity: Number(m?.itemqty ?? 0),
       })),
+
+      // keep your UI expects docLinks array
       docLinks: [],
     };
 

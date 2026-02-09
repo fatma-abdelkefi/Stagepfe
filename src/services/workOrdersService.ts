@@ -1,13 +1,8 @@
-// src/services/workOrderService.ts
 import axios from 'axios';
 import { Buffer } from 'buffer';
 import { WorkOrder } from '../viewmodels/WorkOrdersViewModel';
 
 const BASE_URL = 'http://demo2.smartech-tn.com/maximo/oslc/os/mxwo';
-
-/* =======================
-   TYPES MAXIMO
-======================= */
 
 interface MaximoResponse {
   member?: any[];
@@ -20,16 +15,19 @@ interface MaximoWorkOrderItem {
   location?: string | { location?: string };
   locationdescription?: string;
   assetnum?: string;
+  asset: string;
   status?: string;
   priority?: string | number;
   siteid?: string;
+  workorderid?: number;
+  ishistory?: boolean;
+  assetDescription?: string;
 
   scheduledstart?: string;
   targetstart?: string;
   targstartdate?: string;
   scheduledfinish?: string;
 }
-
 interface MaximoWorkOrderDetails extends MaximoWorkOrderItem {
   worktype?: string;
   glaccount?: string;
@@ -39,11 +37,6 @@ interface MaximoWorkOrderDetails extends MaximoWorkOrderItem {
   failclass?: string;
   problemcode?: string;
 }
-
-/* =======================
-   AUTH
-======================= */
-
 function makeMaxAuth(username: string, password: string): string {
   try {
     return btoa(`${username}:${password}`);
@@ -52,14 +45,7 @@ function makeMaxAuth(username: string, password: string): string {
   }
 }
 
-/* =======================
-   FETCH LIST (WORK ORDERS)
-======================= */
-
-export async function getWorkOrders(
-  username: string,
-  password: string
-): Promise<WorkOrder[]> {
+export async function getWorkOrders(username: string, password: string): Promise<WorkOrder[]> {
   try {
     const token = makeMaxAuth(username, password);
 
@@ -70,24 +56,24 @@ export async function getWorkOrders(
       },
       params: {
         lean: 1,
-        savedQuery: 'WOTRACK:OWNER IS ME', // 🔹 filtre OWNER IS ME
+        savedQuery: 'WOTRACK:OWNER IS ME',
         'oslc.select':
-          'wonum,description,status,assetnum,location,locationdescription,priority,siteid,scheduledstart,targetstart,targstartdate,scheduledfinish',
+        'wonum,description,status,' +
+        'assetnum,asset.description,' +
+        'location,locationdescription,' +
+        'priority,siteid,workorderid,ishistory,' +
+        'scheduledstart,targetstart,targstartdate,scheduledfinish',
         'oslc.pageSize': 100,
       },
       timeout: 30000,
     });
 
     const items: MaximoWorkOrderItem[] = res.data?.member ?? [];
-
     console.log(`[getWorkOrders] ${items.length} WO récupérés`);
 
     return items.map((item): WorkOrder => {
       const scheduledStart: string | null =
-        item.scheduledstart ||
-        item.targetstart ||
-        item.targstartdate ||
-        null;
+        item.scheduledstart || item.targetstart || item.targstartdate || null;
 
       return {
         wonum: item.wonum ?? '',
@@ -97,17 +83,27 @@ export async function getWorkOrders(
         location:
           typeof item.location === 'object' && item.location !== null
             ? item.location.location ?? item.locationdescription ?? ''
-            : item.locationdescription ?? item.location ?? '',
+            : item.locationdescription ?? (item.location as any) ?? '',
+        locationDescription: item.locationdescription ?? '',
         asset: item.assetnum ?? '',
+        assetDescription: (item as any)?.asset?.description ?? '',
         status: item.status ?? '',
         scheduledStart,
+        scheduledFinish: item.scheduledfinish ?? null,
+
         priority: Number(item.priority ?? 0),
         isDynamic: false,
         dynamicJobPlanApplied: false,
+
+        // ✅ keep old UI field
         site: item.siteid ?? '',
-        completed: ['COMP', 'CLOSE'].includes(
-          (item.status ?? '').toUpperCase()
-        ),
+
+        // ✅ new fields
+        siteid: item.siteid ?? undefined,
+        workorderid: item.workorderid ?? undefined,
+        ishistory: item.ishistory ?? undefined,
+
+        completed: ['COMP', 'CLOSE'].includes((item.status ?? '').toUpperCase()),
         isUrgent: Number(item.priority) === 1,
         cout: 0,
       };
@@ -167,6 +163,7 @@ export async function getWorkOrderDetails(
         typeof item.location === 'object' && item.location !== null
           ? item.location.location ?? ''
           : item.location ?? '',
+      locationDescription: item.locationdescription ?? '',
       asset: item.assetnum ?? '',
       workType: item.worktype,
       glAccount: item.glaccount,

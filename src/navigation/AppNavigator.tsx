@@ -1,49 +1,81 @@
+// src/navigation/AppNavigator.tsx
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { View, Text, ActivityIndicator } from 'react-native';
+
 import LaunchScreen from '../views/LaunchScreen';
 import LoginScreen from '../views/LoginScreen';
 import WorkOrdersScreen from '../views/WorkOrdersScreen';
 import WorkOrderDetailsScreen from '../views/WorkOrderDetailsScreen';
-import AddMaterial from '../views/AddMaterialScreen'; 
-import AddLaborScreen from '../views/AddLaborScreen';   // ✅ Ajouté
+import AddMaterialScreen from '../views/AddMaterialScreen';
+import AddLaborScreen from '../views/AddLaborScreen';
+import AddDoclinkScreen from '../views/AddDoclinkScreen';
+
 import { WorkOrder } from '../viewmodels/WorkOrdersViewModel';
+import { useAuth } from '../context/AuthContext';
 
 export type RootStackParamList = {
   Launch: undefined;
   Login: undefined;
   WorkOrders: undefined;
   WorkOrderDetails: { workOrder: WorkOrder };
-  AddItem: { category: string; wonum: string };
-  AddLabor: {workOrderId: string; site: string ; onSuccess?: () => void; onRefresh?: () => void };    
-  AddMaterial: { wonum: string };
-  AddActivity: { wonum: string };
-  AddDocument: { wonum: string };
-  onRefresh?: () => void; 
+
+  AddLabor: {
+    workorderid: number;
+    siteid: string;
+    onSuccess?: () => void;
+    onRefresh?: () => void;
+  };
+
+  AddMaterial: {
+    wonum: string;
+    workorderid?: number;
+    siteid?: string;
+    status?: string;
+    ishistory?: boolean;
+  };
+  AddDoclink: {
+    ownerid: number;
+    siteid: string;
+  }; 
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-export default function AppNavigator() {
+function Splash() {
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="Launch" component={LaunchScreen} />
-      <Stack.Screen name="Login" component={LoginScreen} />
-      <Stack.Screen name="WorkOrders" component={WorkOrdersScreen} />
-      <Stack.Screen name="WorkOrderDetails" component={WorkOrderDetailsScreen} />
-      
-      {/* Ajouter Labor */}
-      <Stack.Screen
-        name="AddLabor"
-        component={AddLaborScreen} // ✅ nouvel écran
-        options={{ title: 'Ajouter Main d\'œuvre' }}
-      />
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0b1220' }}>
+      <ActivityIndicator size="large" color="#3b82f6" />
+      <Text style={{ marginTop: 12, color: '#93c5fd', fontWeight: '600' }}>Chargement...</Text>
+    </View>
+  );
+}
 
-      {/* Material déjà présent */}
-      <Stack.Screen
-        name="AddMaterial"
-        component={AddMaterial}
-        options={{ title: 'Ajouter Matériel' }}
-      />
+export default function AppNavigator() {
+  const { username, password, authLoading } = useAuth();
+  const isLoggedIn = !!username && !!password;
+
+  if (authLoading) return <Splash />;
+
+  return (
+    <Stack.Navigator
+      screenOptions={{ headerShown: false }}
+      initialRouteName="Launch"
+    >
+      <Stack.Screen name="Launch" component={LaunchScreen} />
+
+      {isLoggedIn ? (
+        <>
+          <Stack.Screen name="WorkOrders" component={WorkOrdersScreen} />
+          <Stack.Screen name="WorkOrderDetails" component={WorkOrderDetailsScreen} />
+          <Stack.Screen name="AddLabor" component={AddLaborScreen} />
+          <Stack.Screen name="AddMaterial" component={AddMaterialScreen} />
+          <Stack.Screen name="AddDoclink" component={AddDoclinkScreen} />
+        </>
+      ) : (
+        <Stack.Screen name="Login" component={LoginScreen} />
+      )}
     </Stack.Navigator>
   );
+
 }

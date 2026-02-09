@@ -1,25 +1,45 @@
 // src/viewmodels/AddMaterialViewModel.ts
 import { useState } from 'react';
-import axios from 'axios';
-
-export interface Material {
-  description: string;
-  quantity: number;
-  itemnum: string;
-  location: string;
-  barcode?: string;
-}
+import {
+  MaterialInput,
+  resolveWorkOrderIdAndSite,
+  addMaterialToWorkOrder,
+} from '@services/materialService';
 
 export interface AddMaterialOptions {
-  workOrderId: number | string;
+  woKey: string;
   username: string;
   password: string;
   onSuccess?: () => void;
   onRefresh?: () => void;
 }
 
+function isReadOnlyWO(status?: string, ishistory?: boolean) {
+  const s = (status || '').toUpperCase();
+  if (ishistory === true) return true;
+  if (['COMP', 'CLOSE', 'CAN', 'CANC'].includes(s)) return true;
+  return false;
+}
+
+function extractMaximoError(error: any): {
+  reasonCode?: string;
+  errorattrname?: string;
+  message?: string;
+} {
+  const errObj =
+    error?.response?.data?.Error ||
+    error?.response?.data?.error ||
+    error?.response?.data;
+
+  return {
+    reasonCode: errObj?.reasonCode,
+    errorattrname: errObj?.errorattrname,
+    message: errObj?.message || error?.message,
+  };
+}
+
 export const useAddMaterialViewModel = ({
-  workOrderId,
+  woKey,
   username,
   password,
   onSuccess,
@@ -34,41 +54,75 @@ export const useAddMaterialViewModel = ({
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
 
+  const [successVisible, setSuccessVisible] = useState(false);
+  const [successTitle, setSuccessTitle] = useState('Succès');
+  const [successMessage, setSuccessMessage] = useState('Matériel ajouté avec succès ✅');
+
+  const openSuccess = (title: string, msg: string) => {
+    setSuccessTitle(title);
+    setSuccessMessage(msg);
+    setSuccessVisible(true);
+  };
+
+  const closeSuccess = () => {
+    setSuccessVisible(false);
+    
+  };
+
   const addMaterial = async () => {
     if (!description || !itemnum || quantity === undefined || !location) {
       setMessage('Veuillez remplir tous les champs requis');
       return;
     }
 
+    if (!username || !password) {
+      setMessage('Session invalide. Veuillez vous reconnecter.');
+      return;
+    }
+
     setLoading(true);
     setMessage('');
 
-    const payload: Material = {
+    const material: MaterialInput = {
       description: description.trim(),
       itemnum: itemnum.trim(),
       quantity,
-      location: location.trim(),
+      location: location.trim().toUpperCase(),
       barcode: barcode.trim() || undefined,
     };
 
     try {
-      const headers = {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        MAXAUTH: `Basic ${btoa(`${username}:${password}`)}`,
-        properties: '*',
-      };
+      console.log('==============================');
+      console.log('🧾 [VM] addMaterial pressed');
+      console.log('🧾 [VM] woKey:', woKey);
+      console.log('🧾 [VM] material:', material);
 
-      console.log('🔹 Headers:', headers);
-      console.log('🔹 Payload:', { wpmaterial: [payload] });
+      const resolved = await resolveWorkOrderIdAndSite({
+        woKey,
+        username,
+        password,
+      });
 
-      const url = `http://demo2.smartech-tn.com/maximo/oslc/os/SM1122/${workOrderId}/wpmaterial`;
+      console.log('✅ [VM] Resolved WO:', resolved);
 
-      await axios.post(url, payload, { headers });
+      if (isReadOnlyWO(resolved.status, resolved.ishistory)) {
+        const st = resolved.status || 'UNKNOWN';
+        const text = `OT non modifiable (status=${st}, history=${
+          resolved.ishistory ? 'YES' : 'NO'
+        })`;
+        setMessage(text);
+        return;
+      }
 
-      setMessage('Matériel ajouté avec succès');
+      await addMaterialToWorkOrder({
+        workorderid: resolved.workorderid,
+        username,
+        password,
+        material,
+        siteid: resolved.siteid,
+      });
 
-      // Reset fields
+      // ✅ reset inputs
       setDescription('');
       setItemnum('');
       setQuantity(undefined);
@@ -76,14 +130,33 @@ export const useAddMaterialViewModel = ({
       setBarcode('');
 
       onRefresh?.();
-      onSuccess?.();
+
+      // ✅ show beautiful success modal
+      openSuccess('Succès', 'Matériel ajouté avec succès ✅');
     } catch (error: any) {
-      console.error('❌ Material add error:', error.response || error.message);
-      setMessage(
-        `Erreur lors de l'ajout: ${error?.response?.data?.Error?.message || error.message}`
-      );
+      console.log('❌ [VM] addMaterial error RAW:', error?.response?.data || error?.message);
+
+      const { reasonCode, errorattrname, message: rawMsg } = extractMaximoError(error);
+
+      // ✅ Friendly message (invalid itemnum)
+      if (reasonCode === 'BMXAA4191E' || errorattrname === 'itemnum') {
+        const friendly =
+          "Numéro d'article invalide.\nVeuillez saisir un numéro d’article valide (ex: 0-0514).";
+        setMessage(friendly);
+        return;
+      }
+
+      const apiMsg =
+        rawMsg ||
+        error?.response?.data?.Error?.message ||
+        error?.response?.data?.error?.message ||
+        error?.message ||
+        'Erreur inconnue.';
+
+      setMessage(`Erreur lors de l'ajout: ${apiMsg}`);
     } finally {
       setLoading(false);
+      console.log('==============================');
     }
   };
 
@@ -101,5 +174,10 @@ export const useAddMaterialViewModel = ({
     loading,
     message,
     addMaterial,
+
+    successVisible,
+    successTitle,
+    successMessage,
+    closeSuccess,
   };
 };

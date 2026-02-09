@@ -12,8 +12,8 @@ import LinearGradient from 'react-native-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
+import { useAuth } from '../context/AuthContext';
 
-// ✅ Type de navigation pour LaunchScreen
 type LaunchScreenNavigationProp = NativeStackNavigationProp<
   RootStackParamList,
   'Launch'
@@ -21,6 +21,9 @@ type LaunchScreenNavigationProp = NativeStackNavigationProp<
 
 export default function LaunchScreen() {
   const navigation = useNavigation<LaunchScreenNavigationProp>();
+  const { username, password, authLoading } = useAuth();
+
+  const isLoggedIn = !!username && !!password;
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -51,7 +54,6 @@ export default function LaunchScreen() {
       }),
     ]).start();
 
-    // Pulse animation loop
     Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, {
@@ -66,8 +68,7 @@ export default function LaunchScreen() {
         }),
       ])
     ).start();
-
-    // Rotate animation for decorative elements
+    
     Animated.loop(
       Animated.timing(rotateAnim, {
         toValue: 1,
@@ -75,14 +76,20 @@ export default function LaunchScreen() {
         useNativeDriver: true,
       })
     ).start();
+  }, [fadeAnim, scaleAnim, slideUpAnim, pulseAnim, rotateAnim]);
 
-    // Navigate to Login after 3 seconds
+      useEffect(() => {
     const timer = setTimeout(() => {
-      navigation.replace('Login'); // ✅ corrigé
-    }, 3000);
+      if (isLoggedIn) {
+        navigation.replace('WorkOrders');
+      } else {
+        navigation.replace('Login');
+      }
+    }, 2000);
 
     return () => clearTimeout(timer);
-  }, []);
+  }, [navigation, isLoggedIn]);
+
 
   const spin = rotateAnim.interpolate({
     inputRange: [0, 1],
@@ -98,7 +105,6 @@ export default function LaunchScreen() {
     >
       <StatusBar barStyle="light-content" backgroundColor="#000000" />
 
-      {/* Animated Background Circles */}
       <Animated.View
         style={[
           styles.circle1,
@@ -122,9 +128,7 @@ export default function LaunchScreen() {
         ]}
       />
 
-      {/* Main Content */}
       <View style={styles.content}>
-        {/* Logo Container with Glow Effect */}
         <Animated.View
           style={[
             styles.logoContainer,
@@ -139,7 +143,6 @@ export default function LaunchScreen() {
           </View>
         </Animated.View>
 
-        {/* Subtitle */}
         <Animated.View
           style={[
             styles.textContainer,
@@ -182,5 +185,10 @@ const styles = StyleSheet.create({
   },
   logo: { width: 240, height: 240, resizeMode: 'contain' },
   textContainer: { alignItems: 'center' },
-  subtitle: { fontSize: 18, fontWeight: '600', color: '#93c5fd', letterSpacing: 2 },
+  subtitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#93c5fd',
+    letterSpacing: 2,
+  },
 });

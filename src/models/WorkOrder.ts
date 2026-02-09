@@ -3,14 +3,21 @@ export type WorkOrder = {
   description: string;
   location: string;
   asset: string;
-  site?: string;
+
+  // ✅ Add these (optional so it won’t break old data)
+  workorderid?: number;
+  siteid?: string;      // Maximo uses siteid; your old type had site?: string
+  ishistory?: boolean;
+
   status: string;
   actualStart?: string;
   actualFinish?: string;
+
   wplabor?: WPLaborItem[];
   labor?: LaborItem[];
   wplabor_collectionref?: string;
 };
+
 export interface MaximoLaborResponse {
   member?: Array<{
     taskid?: string;
@@ -33,4 +40,3 @@ export interface WPLaborItem {
   taskid?: string;
   description?: string;
 }
-

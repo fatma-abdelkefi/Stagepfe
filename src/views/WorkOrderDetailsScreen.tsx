@@ -1,5 +1,5 @@
 // src/views/WorkOrderDetailsScreen.tsx
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -12,13 +12,13 @@ import {
   Modal,
   Dimensions,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { RouteProp, useNavigation } from '@react-navigation/native';
+import { RouteProp, useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useWorkOrderDetails } from '../viewmodels/WorkOrderDetailsViewModel';
 import FeatherIcon from 'react-native-vector-icons/Feather';
 import LinearGradient from 'react-native-linear-gradient';
+import { useAuth } from '../context/AuthContext';
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = (width - 60) / 2;
@@ -42,29 +42,30 @@ const CATEGORIES = [
 export default function WorkOrderDetailsScreen({ route }: Props) {
   const { workOrder: woParam } = route.params;
   const navigation = useNavigation<WorkOrderDetailsNavigationProp>();
+
+  const { username, password, authLoading } = useAuth();
+
+  useEffect(() => {
+    if (authLoading) return;
+
+    if (!username || !password) {
+      Alert.alert('Utilisateur non connecté', 'Veuillez vous connecter');
+      navigation.replace('Login');
+    }
+  }, [authLoading, username, password, navigation]);
+
   const { workOrder: details, loading, error, refresh } = useWorkOrderDetails(woParam.wonum);
 
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [modalVisible, setModalVisible] = useState(false);
 
-  // Vérification de login
-  useEffect(() => {
-    const checkLogin = async () => {
-      const username = await AsyncStorage.getItem('@username');
-      const password = await AsyncStorage.getItem('@password');
-      if (!username || !password) {
-        Alert.alert('Utilisateur non connecté', 'Veuillez vous connecter');
-        navigation.replace('Login');
-      }
-    };
-    checkLogin();
-  }, []);
-    useEffect(() => {
-  refresh();
-}, [woParam.wonum]);
+  useFocusEffect(
+    useCallback(() => {
+      refresh();
+    }, [woParam.wonum])
+  );
 
-  // ───── CATEGORY DATA ─────
   const getCategoryData = (category: string) => {
     if (!details) return [];
     switch (category) {
@@ -83,9 +84,9 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
 
   const getCategoryCount = (category: string) => getCategoryData(category).length;
 
-  // ───── MODAL HANDLERS ─────
   const openCategoryModal = (category: string) => {
     setSelectedCategory(category);
+    setSelectedItem(null);
     setModalVisible(true);
   };
 
@@ -96,17 +97,13 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
     setSelectedItem(null);
   };
 
-  const getCategoryConfig = (category: string) =>
-    CATEGORIES.find(c => c.key === category) || CATEGORIES[0];
-
-  // ───── ADD CATEGORY ITEM ─────
   const onAddCategoryItem = (category: string) => {
     Alert.alert('Ajouter', `Ajouter un nouvel élément à la catégorie "${category}"`);
   };
 
-  // ───── RENDER ITEM CARD ─────
   const renderItemCard = (item: any, index: number, category: string) => {
     let title = '', subtitle = '', icon = 'circle', additionalInfo = '';
+
     if (category === 'Activités') {
       title = `Activité ${item.taskid || 'N/A'}`;
       subtitle = item.description || 'Aucune description';
@@ -138,7 +135,7 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
       >
         <View style={styles.itemHeader}>
           <View style={styles.itemIcon}>
-            <FeatherIcon name={icon} size={20} color="#3b82f6" />
+            <FeatherIcon name={icon as any} size={20} color="#3b82f6" />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.itemTitle} numberOfLines={1}>{title}</Text>
@@ -146,8 +143,7 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
           </View>
         </View>
         <Text style={styles.itemSubtitle} numberOfLines={2}>{subtitle}</Text>
-        <View style={styles.itemFooter}>
-        </View>
+        <View style={styles.itemFooter} />
       </TouchableOpacity>
     );
   };
@@ -155,6 +151,7 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
   const renderCategoryList = () => {
     if (!selectedCategory) return null;
     const data = getCategoryData(selectedCategory);
+
     return (
       <View style={styles.modalContent}>
         <View style={styles.modalHeader}>
@@ -166,6 +163,7 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
             <FeatherIcon name="x" size={24} color="#64748b" />
           </TouchableOpacity>
         </View>
+
         <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
           {data.length === 0 ? (
             <View style={styles.emptyModal}>
@@ -180,16 +178,25 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
     );
   };
 
-  // ───── LOADING / ERROR ─────
-  if (loading)
+  if (authLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#3b82f6" />
+        <Text style={styles.loadingText}>Vérification session...</Text>
+      </View>
+    );
+  }
+
+  if (loading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#3b82f6" />
         <Text style={styles.loadingText}>Chargement...</Text>
       </View>
     );
+  }
 
-  if (error || !details)
+  if (error || !details) {
     return (
       <View style={styles.errorContainer}>
         <FeatherIcon name="alert-circle" size={64} color="#ef4444" />
@@ -207,11 +214,10 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
         </TouchableOpacity>
       </View>
     );
+  }
 
-  // ───── MAIN RENDER ─────
   return (
     <SafeAreaView style={styles.container}>
-      {/* HEADER + WO CARD */}
       <LinearGradient
         colors={['#3b82f6', '#2563eb', '#1e40af']}
         start={{ x: 0, y: 0 }}
@@ -232,12 +238,14 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
               <Text style={styles.woLabel}>Ordre de travail</Text>
               <Text style={styles.woNumber}>#{details.wonum}</Text>
             </View>
+
             {details.isUrgent && !details.completed && (
               <View style={[styles.statusBadge, { backgroundColor: '#fee2e2' }]}>
                 <FeatherIcon name="alert-circle" size={14} color="#dc2626" />
                 <Text style={[styles.statusBadgeText, { color: '#dc2626' }]}>Urgent</Text>
               </View>
             )}
+
             {details.completed && (
               <View style={[styles.statusBadge, { backgroundColor: '#dbeafe' }]}>
                 <FeatherIcon name="check-circle" size={14} color="#2563eb" />
@@ -245,7 +253,9 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
               </View>
             )}
           </View>
+
           <Text style={styles.description}>{details.description || 'Aucune description'}</Text>
+
           <View style={styles.infoGrid}>
             <View style={styles.infoItem}>
               <FeatherIcon name="tool" size={16} color="#3b82f6" />
@@ -254,6 +264,7 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
                 <Text style={styles.infoValue}>{details.asset || '-'}</Text>
               </View>
             </View>
+
             <View style={styles.infoItem}>
               <FeatherIcon name="map-pin" size={16} color="#3b82f6" />
               <View style={{ flex: 1 }}>
@@ -262,6 +273,7 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
               </View>
             </View>
           </View>
+
           <View style={styles.infoGrid}>
             <View style={styles.infoItem}>
               <FeatherIcon name="calendar" size={16} color="#3b82f6" />
@@ -270,6 +282,7 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
                 <Text style={styles.infoValue}>{details.scheduledStart || '-'}</Text>
               </View>
             </View>
+
             <View style={styles.infoItem}>
               <FeatherIcon name="check-square" size={16} color="#3b82f6" />
               <View style={{ flex: 1 }}>
@@ -281,7 +294,6 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
         </View>
       </LinearGradient>
 
-      {/* CATEGORY CARDS */}
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={styles.sectionTitle}>Catégories</Text>
         <View style={styles.categoryGrid}>
@@ -295,14 +307,14 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
                 onPress={() => openCategoryModal(category.key)}
               >
                 <LinearGradient
-                  colors={category.gradient}
+                  colors={category.gradient as any}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                   style={styles.categoryGradient}
                 >
                   <View>
                     <View style={styles.categoryIconContainer}>
-                      <FeatherIcon name={category.icon} size={32} color="#fff" />
+                      <FeatherIcon name={category.icon as any} size={32} color="#fff" />
                     </View>
                     <Text style={styles.categoryName}>{category.key}</Text>
                   </View>
@@ -311,24 +323,61 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
                     <Text style={styles.categoryCountText}>{count}</Text>
                   </View>
 
-                  {/* PLUS BUTTON */}
-                  <TouchableOpacity
-                    onPress={() => {
-                      if (category.key === 'Matériel') {
-                        navigation.navigate('AddMaterial', { wonum: details.wonum });
-                      } else if (category.key === "Main d'œuvre") {
-                        navigation.navigate('AddLabor', {
-                          workOrderId: details.wonum,
-                          site: details.site,
-                        });
-                      } else {
-                        onAddCategoryItem(category.key);
-                      }
-                    }}
-                    style={styles.plusButton}
-                  >
-                    <FeatherIcon name="plus" size={20} color="#fff" />
-                  </TouchableOpacity>
+                  {/* Bouton + masqué pour Activités */}
+                  {category.key !== 'Activités' && (
+                    <TouchableOpacity
+                      onPress={() => {
+                        if (category.key === 'Matériel') {
+                          console.log('➡️ AddMaterial params:', {
+                            wonum: details.wonum,
+                            workorderid: details.workorderid,
+                            siteid: details.siteid,
+                            status: details.status,
+                            ishistory: details.ishistory,
+                          });
+
+                          navigation.navigate('AddMaterial', {
+                            wonum: details.wonum,
+                            workorderid: details.workorderid,
+                            siteid: details.siteid,
+                            status: details.status,
+                            ishistory: details.ishistory,
+                          });
+
+                        } else if (category.key === "Main d'œuvre") {
+                          if (!details.workorderid || !details.siteid) {
+                            Alert.alert('Erreur', 'workorderid / siteid manquant pour cet OT');
+                            return;
+                          }
+
+                          console.log('➡️ AddLabor params:', {
+                            workorderid: details.workorderid,
+                            siteid: details.siteid,
+                          });
+
+                          navigation.navigate('AddLabor', {
+                            workorderid: details.workorderid,
+                            siteid: details.siteid,
+                          });
+                        } else if (category.key === 'Documents') {
+                          if (!details.workorderid || !details.siteid) {
+                            Alert.alert('Erreur', 'workorderid / siteid manquant pour cet OT');
+                            return;
+                          }
+
+                          navigation.navigate('AddDoclink', {
+                            ownerid: details.workorderid,
+                            siteid: details.siteid,
+                          });
+                        } else {
+                          onAddCategoryItem(category.key);
+                        }
+                      }}
+                      style={styles.plusButton}
+                    >
+                      <FeatherIcon name="plus" size={20} color="#fff" />
+                    </TouchableOpacity>
+                  )}
                 </LinearGradient>
               </TouchableOpacity>
             );
@@ -336,7 +385,6 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
         </View>
       </ScrollView>
 
-      {/* MODAL */}
       <Modal visible={modalVisible} animationType="fade" transparent={true} onRequestClose={closeModal}>
         <View style={styles.modalOverlay}>
           <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={closeModal} />
@@ -349,7 +397,7 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
   );
 }
 
-// ───── STYLES ─────
+// Styles inchangés
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8fafc' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#1e3a8a' },
