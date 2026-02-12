@@ -35,16 +35,13 @@ export const useAddDoclinkViewModel = ({
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
 
-  // ✅ success modal
   const [successVisible, setSuccessVisible] = useState(false);
   const [successTitle, setSuccessTitle] = useState('Succès');
-  const [successMessage, setSuccessMessage] = useState(
-    'Document ajouté avec succès 📎'
-  );
+  const [successMessage, setSuccessMessage] = useState('Document ajouté avec succès 📎');
 
   const closeSuccess = () => {
     setSuccessVisible(false);
-    onSuccess?.();
+    onSuccess?.(); // ✅ navigation here, only once
   };
 
   const openSuccess = (title: string, msg: string) => {
@@ -59,6 +56,11 @@ export const useAddDoclinkViewModel = ({
       return;
     }
 
+    if (!username || !password) {
+      setMessage('Session invalide. Veuillez vous reconnecter.');
+      return;
+    }
+
     setLoading(true);
     setMessage('');
 
@@ -69,6 +71,11 @@ export const useAddDoclinkViewModel = ({
     };
 
     try {
+      console.log('==============================');
+      console.log('🧾 [VM addDoclink] ownerid:', ownerid, 'siteid:', siteid);
+      console.log('🧾 [VM addDoclink] document:', documentName);
+      console.log('🧾 [VM addDoclink] base64 length:', base64Data.length);
+
       await addDoclink({
         ownerid,
         siteid,
@@ -81,8 +88,10 @@ export const useAddDoclinkViewModel = ({
       setBase64Data('');
       setDescription('');
 
-      onRefresh?.();
+      onRefresh?.(); // (optionnel)
       openSuccess('Succès', 'Document ajouté avec succès 📎');
+
+      console.log('==============================');
     } catch (error: any) {
       const { message } = extractMaximoError(error);
       setMessage(message);
@@ -101,7 +110,6 @@ export const useAddDoclinkViewModel = ({
     loading,
     message,
     addDocument,
-
     successVisible,
     successTitle,
     successMessage,

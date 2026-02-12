@@ -4,9 +4,6 @@ import type { WorkOrder } from '../viewmodels/WorkOrdersViewModel';
 
 const BASE_URL = 'http://demo2.smartech-tn.com/maximo/oslc/os/mxwo';
 
-const toArray = <T>(val?: T | T[]): T[] =>
-  !val ? [] : Array.isArray(val) ? val : [val];
-
 const makeMaxAuth = (u: string, p: string) =>
   Buffer.from(`${u}:${p}`).toString('base64');
 
@@ -17,23 +14,60 @@ export const parseLabHrs = (val: string | number | undefined): number => {
   return p.length === 2 ? p[0] + p[1] / 60 : Number(val) || 0;
 };
 
+// ✅ Robust parser for doclinks
+function normalizeDoclinks(raw: any): Array<{ document: string; description: string; createdate: string; urlname: string }> {
+  if (!raw) return [];
+
+  // case 1: { member: [...] }
+  const member = Array.isArray(raw?.member) ? raw.member : null;
+  if (member) {
+    return member.map((d: any) => ({
+      document: d?.document ?? d?.docinfo?.document ?? '',
+      description: d?.description ?? '',
+      createdate: d?.createdate ?? '',
+      urlname: d?.urlname ?? d?.href ?? '',
+    }));
+  }
+
+  // case 2: already array
+  if (Array.isArray(raw)) {
+    return raw.map((d: any) => ({
+      document: d?.document ?? d?.docinfo?.document ?? '',
+      description: d?.description ?? '',
+      createdate: d?.createdate ?? '',
+      urlname: d?.urlname ?? d?.href ?? '',
+    }));
+  }
+
+  // case 3: single object doclink
+  if (typeof raw === 'object') {
+    // sometimes doclinks returns link-only object
+    if (raw?.href && !raw?.document && !raw?.description) return [];
+    return [{
+      document: raw?.document ?? raw?.docinfo?.document ?? '',
+      description: raw?.description ?? '',
+      createdate: raw?.createdate ?? '',
+      urlname: raw?.urlname ?? raw?.href ?? '',
+    }];
+  }
+
+  return [];
+}
+
 interface MaximoWorkOrderItem {
   wonum?: string;
   description?: string;
   status?: string;
   assetnum?: string;
+  asset?: { description?: string } | string;
   location?: string | { location?: string };
   locationdescription?: string;
   priority?: number | string;
   siteid?: string;
-
-  // ✅ add
   workorderid?: number;
   ishistory?: boolean;
-
   scheduledstart?: string;
   scheduledfinish?: string;
-
   woactivity?: any | any[];
   wplabor?: any | any[];
   wpmaterial?: any | any[];
@@ -62,28 +96,51 @@ export async function getWorkOrderDetails(
         lean: 1,
         'oslc.where': `wonum="${wonum}"`,
         'oslc.pageSize': 1,
+        // ✅ IMPORTANT: ask Maximo to expand doclinks fields (if supported)
         'oslc.select':
-          'wonum,description,status,assetnum,location,locationdescription,priority,siteid,workorderid,ishistory,' +
+          'wonum,description,status,assetnum,asset.description,location,locationdescription,priority,siteid,workorderid,ishistory,' +
           'scheduledstart,scheduledfinish,' +
           'woactivity{taskid,description,status,labhrs},' +
           'wplabor{taskid,laborcode,description,labhrs,regularhrs,laborhrs},' +
           'wpmaterial{taskid,itemnum,description,itemqty},' +
-          'doclinks',
+          'doclinks{document,description,createdate,urlname,href}',
       },
+      timeout: 30000,
     });
 
     if (!res.data.member?.length) return null;
 
     const item = res.data.member[0];
 
+    const loc =
+      typeof item.location === 'string'
+        ? item.location
+        : item.location?.location ?? '';
+
+    const locDesc = item.locationdescription ?? loc ?? '';
+
+    const docLinksArr = normalizeDoclinks(item.doclinks);
+
+    console.log('==============================');
+    console.log('📥 [getWorkOrderDetails] wonum:', wonum);
+    console.log('📥 [getWorkOrderDetails] raw doclinks type:', typeof item.doclinks);
+    console.log('📥 [getWorkOrderDetails] docLinksArr length:', docLinksArr.length);
+    console.log('📥 [getWorkOrderDetails] docLinksArr sample:', docLinksArr[0]);
+    console.log('==============================');
+
     const wo: WorkOrder = {
       wonum: item.wonum ?? wonum,
       barcode: item.wonum ?? wonum,
+
       description: item.description ?? '',
       details: '',
-      location:
-        typeof item.location === 'string' ? item.location : item.location?.location ?? item.locationdescription ?? '',
+
+      location: locDesc || loc || '',
+      locationDescription: locDesc || '',
+
       asset: item.assetnum ?? '',
+      assetDescription: (item as any)?.asset?.description ?? '',
+
       status: item.status ?? '',
 
       scheduledStart: item.scheduledstart ?? null,
@@ -93,10 +150,8 @@ export async function getWorkOrderDetails(
       isDynamic: false,
       dynamicJobPlanApplied: false,
 
-      // ✅ keep old UI field
       site: item.siteid ?? '',
 
-      // ✅ new fields required by your AddMaterial navigation
       siteid: item.siteid ?? undefined,
       workorderid: item.workorderid ?? undefined,
       ishistory: item.ishistory ?? undefined,
@@ -105,34 +160,34 @@ export async function getWorkOrderDetails(
       isUrgent: Number(item.priority) === 1,
       cout: 0,
 
-      activities: toArray(item.woactivity).map(a => ({
+      activities: (Array.isArray(item.woactivity) ? item.woactivity : item.woactivity ? [item.woactivity] : []).map(a => ({
         taskid: String(a?.taskid ?? ''),
         description: a?.description ?? '',
         status: a?.status ?? '',
         labhrs: parseLabHrs(a?.labhrs),
       })),
 
-      labor: toArray(item.wplabor).map(l => ({
+      labor: (Array.isArray(item.wplabor) ? item.wplabor : item.wplabor ? [item.wplabor] : []).map(l => ({
         taskid: String(l?.taskid ?? ''),
         laborcode: l?.laborcode ?? '',
         description: l?.description ?? '',
         labhrs: parseLabHrs(l?.labhrs ?? l?.regularhrs ?? l?.laborhrs),
       })),
 
-      materials: toArray(item.wpmaterial).map(m => ({
+      materials: (Array.isArray(item.wpmaterial) ? item.wpmaterial : item.wpmaterial ? [item.wpmaterial] : []).map(m => ({
         taskid: String(m?.taskid ?? ''),
         itemnum: m?.itemnum ?? '',
         description: m?.description ?? '',
         quantity: Number(m?.itemqty ?? 0),
       })),
 
-      // keep your UI expects docLinks array
-      docLinks: [],
+      // ✅ correct doclinks
+      docLinks: docLinksArr,
     };
 
     return wo;
-  } catch (err) {
-    console.error('Erreur getWorkOrderDetails:', err);
+  } catch (err: any) {
+    console.error('❌ Erreur getWorkOrderDetails:', err?.response?.data || err?.message || err);
     return null;
   }
 }

@@ -24,11 +24,14 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAuth } from '../context/AuthContext';
+
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'WorkOrders'>;
 
 export default function WorkOrdersScreen() {
   const navigation = useNavigation<NavigationProp>();
+  const { logout } = useAuth();  
 
   const {
     filteredData,
@@ -62,7 +65,7 @@ export default function WorkOrdersScreen() {
       if (!username || !password) {
         setError('Veuillez vous connecter (identifiants manquants).');
         Alert.alert('Session expirée', 'Veuillez vous reconnecter.');
-        navigation.replace('Login' as any);
+        await logout();  
         return;
       }
 
@@ -78,7 +81,7 @@ export default function WorkOrdersScreen() {
       if (status === 401) {
         setError('Accès refusé (401). Vérifiez vos identifiants.');
         Alert.alert('Erreur 401', 'Identifiants invalides. Veuillez vous reconnecter.');
-        navigation.replace('Login' as any);
+        await logout();  
         return;
       }
 

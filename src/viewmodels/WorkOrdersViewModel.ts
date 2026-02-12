@@ -214,5 +214,6 @@ export function useWorkOrders() {
     formatDate,
     todayCount,
     fetchWorkOrderDetails,
+    
   };
 }

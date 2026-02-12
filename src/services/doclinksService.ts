@@ -42,16 +42,27 @@ export async function addDoclink(params: {
     properties: '*',
   };
 
+  console.log('==============================');
   console.log('📎 [addDoclink] URL:', url);
-  console.log('📎 [addDoclink] Headers:', headers);
-  console.log('📎 [addDoclink] Body:', body);
+  console.log('📎 [addDoclink] ownerid:', ownerid, 'siteid:', siteid);
+  console.log('📎 [addDoclink] Body keys:', Object.keys(body));
+  console.log('📎 [addDoclink] document:', body.document);
+  console.log('📎 [addDoclink] base64 length:', doclink.documentdata?.length || 0);
 
   try {
     const response = await axios.post(url, body, { headers });
-    console.log('✅ [addDoclink] Response:', response.status);
+
+    console.log('✅ [addDoclink] Status:', response.status);
+    console.log('✅ [addDoclink] Response data:', JSON.stringify(response.data)?.slice(0, 2000));
+    console.log('==============================');
+
     return response.data;
   } catch (error: any) {
-    console.error('❌ [addDoclink] Error:', error?.response?.data || error?.message);
+    console.log('==============================');
+    console.error('❌ [addDoclink] Status:', error?.response?.status);
+    console.error('❌ [addDoclink] Error data:', JSON.stringify(error?.response?.data)?.slice(0, 3000));
+    console.error('❌ [addDoclink] Message:', error?.message);
+    console.log('==============================');
     throw error;
   }
 }

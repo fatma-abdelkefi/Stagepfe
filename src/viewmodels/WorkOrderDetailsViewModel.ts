@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getWorkOrderDetails } from '../services/workOrderDetailsService';
 import type { WorkOrder, ActivityItem, LaborItem, MaterialItem, DocLinkItem } from './WorkOrdersViewModel';
@@ -6,18 +6,27 @@ import type { WorkOrder, ActivityItem, LaborItem, MaterialItem, DocLinkItem } fr
 export function parseLabHrs(labhrs: string | number | undefined | null): number {
   if (!labhrs) return 0;
   if (typeof labhrs === 'number') return labhrs;
-  const parts = labhrs.split(':').map(Number);
-  return parts[0] + (parts[1] ? parts[1] / 60 : 0);
+  const parts = String(labhrs).split(':').map(Number);
+  return (parts[0] || 0) + (parts[1] ? parts[1] / 60 : 0);
 }
 
 export function useWorkOrderDetails(wonum: string) {
   const [workOrder, setWorkOrder] = useState<WorkOrder | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(true);      // first load only
+  const [refreshing, setRefreshing] = useState<boolean>(false); // focus refresh
   const [error, setError] = useState<string | null>(null);
 
-  const fetchDetails = useCallback(async () => {
+  const inFlightRef = useRef(false);
+  const firstLoadDoneRef = useRef(false);
+
+  const fetchDetails = useCallback(async (mode: 'initial' | 'refresh' = 'initial') => {
+    if (inFlightRef.current) return; // ✅ prevent loop
+    inFlightRef.current = true;
+
     try {
-      setLoading(true);
+      if (mode === 'initial') setLoading(true);
+      else setRefreshing(true);
+
       setError(null);
 
       const username = await AsyncStorage.getItem('@username');
@@ -33,24 +42,31 @@ export function useWorkOrderDetails(wonum: string) {
 
       const normalized: WorkOrder = {
         ...details,
+
+        // ✅ guarantee required WorkOrder fields
+        locationDescription: details.locationDescription ?? '',
+
         activities: (details.activities ?? []).map((a: any): ActivityItem => ({
           taskid: String(a.taskid ?? ''),
           description: a.description ?? '',
           status: a.status ?? '',
           labhrs: a.labhrs ?? 0,
         })),
+
         labor: (details.labor ?? []).map((l: any): LaborItem => ({
           taskid: String(l.taskid ?? ''),
           laborcode: l.laborcode ?? '',
           description: l.description ?? '',
           labhrs: parseLabHrs(l.labhrs),
         })),
+
         materials: (details.materials ?? []).map((m: any): MaterialItem => ({
           taskid: String(m.taskid ?? ''),
           itemnum: m.itemnum ?? '',
           description: m.description ?? '',
           quantity: Number(m.quantity ?? 0),
         })),
+
         docLinks: (details.docLinks ?? []).map((d: any): DocLinkItem => ({
           document: d.document ?? '',
           description: d.description ?? '',
@@ -60,16 +76,26 @@ export function useWorkOrderDetails(wonum: string) {
       };
 
       setWorkOrder(normalized);
+      firstLoadDoneRef.current = true;
     } catch (err: any) {
       setWorkOrder(null);
       setError(err?.message || 'Une erreur est survenue lors du chargement.');
     } finally {
-      setLoading(false);
+      if (mode === 'initial') setLoading(false);
+      else setRefreshing(false);
+      inFlightRef.current = false;
     }
   }, [wonum]);
 
   useEffect(() => {
-    fetchDetails();
+    fetchDetails('initial');
+  }, [fetchDetails]);
+
+  // ✅ refresh only when screen focused AND initial already done AND not in flight
+  const refresh = useCallback(() => {
+    if (!firstLoadDoneRef.current) return;
+    if (inFlightRef.current) return;
+    fetchDetails('refresh');
   }, [fetchDetails]);
 
   const formatDate = (dateStr?: string | null): string => {
@@ -88,7 +114,5 @@ export function useWorkOrderDetails(wonum: string) {
     return diffDays > 0 ? `${diffDays}j ${diffHours % 24}h` : `${diffHours}h`;
   };
 
-  const refresh = () => fetchDetails();
-
-  return { workOrder, loading, error, formatDate, calculateDuration, refresh };
+  return { workOrder, loading, refreshing, error, formatDate, calculateDuration, refresh };
 }

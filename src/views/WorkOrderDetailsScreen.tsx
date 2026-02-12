@@ -60,11 +60,18 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [modalVisible, setModalVisible] = useState(false);
 
-  useFocusEffect(
-    useCallback(() => {
+useFocusEffect(
+  useCallback(() => {
+    // ✅ refresh on focus, but NOT during auth loading
+    if (!authLoading) {
       refresh();
-    }, [woParam.wonum])
-  );
+    }
+    return () => {};
+  }, [authLoading, refresh])
+);
+
+
+
 
   const getCategoryData = (category: string) => {
     if (!details) return [];
