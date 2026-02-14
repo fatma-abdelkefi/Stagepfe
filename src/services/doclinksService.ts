@@ -3,7 +3,7 @@ import { Buffer } from 'buffer';
 
 export interface DoclinkInput {
   document: string;
-  documentdata: string; // base64
+  documentdata: string;
   description?: string;
 }
 

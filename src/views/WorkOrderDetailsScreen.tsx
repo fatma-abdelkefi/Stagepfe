@@ -1,5 +1,4 @@
-// src/views/WorkOrderDetailsScreen.tsx
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,7 +8,6 @@ import {
   TouchableOpacity,
   Alert,
   SafeAreaView,
-  Modal,
   Dimensions,
 } from 'react-native';
 import { RouteProp, useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -43,8 +41,13 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
   const { workOrder: woParam } = route.params;
   const navigation = useNavigation<WorkOrderDetailsNavigationProp>();
 
+  // ✅ Hook 1 (always)
   const { username, password, authLoading } = useAuth();
 
+  // ✅ Hook 2.. (always)
+  const { workOrder: details, loading, error, refresh } = useWorkOrderDetails(woParam.wonum);
+
+  // ✅ Hook (always)
   useEffect(() => {
     if (authLoading) return;
 
@@ -54,151 +57,41 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
     }
   }, [authLoading, username, password, navigation]);
 
-  const { workOrder: details, loading, error, refresh } = useWorkOrderDetails(woParam.wonum);
+  // ✅ Hook (always)
+  useFocusEffect(
+    useCallback(() => {
+      // Don’t call refresh while auth is still loading
+      if (!authLoading) {
+        refresh();
+      }
+      return () => {};
+    }, [authLoading, refresh])
+  );
 
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [selectedItem, setSelectedItem] = useState<any>(null);
-  const [modalVisible, setModalVisible] = useState(false);
-
-useFocusEffect(
-  useCallback(() => {
-    // ✅ refresh on focus, but NOT during auth loading
-    if (!authLoading) {
-      refresh();
-    }
-    return () => {};
-  }, [authLoading, refresh])
-);
-
-
-
-
-  const getCategoryData = (category: string) => {
-    if (!details) return [];
+  const getCategoryCount = (category: string) => {
+    if (!details) return 0;
     switch (category) {
       case 'Activités':
-        return details.activities ?? [];
+        return details.activities?.length ?? 0;
       case "Main d'œuvre":
-        return details.labor ?? [];
+        return details.labor?.length ?? 0;
       case 'Matériel':
-        return details.materials ?? [];
+        return details.materials?.length ?? 0;
       case 'Documents':
-        return details.docLinks ?? [];
+        return details.docLinks?.length ?? 0;
       default:
-        return [];
+        return 0;
     }
   };
 
-  const getCategoryCount = (category: string) => getCategoryData(category).length;
-
-  const openCategoryModal = (category: string) => {
-    setSelectedCategory(category);
-    setSelectedItem(null);
-    setModalVisible(true);
-  };
-
-  const openDetailModal = (item: any) => setSelectedItem(item);
-  const closeModal = () => {
-    setModalVisible(false);
-    setSelectedCategory(null);
-    setSelectedItem(null);
-  };
-
-  const onAddCategoryItem = (category: string) => {
-    Alert.alert('Ajouter', `Ajouter un nouvel élément à la catégorie "${category}"`);
-  };
-
-  const renderItemCard = (item: any, index: number, category: string) => {
-    let title = '', subtitle = '', icon = 'circle', additionalInfo = '';
-
-    if (category === 'Activités') {
-      title = `Activité ${item.taskid || 'N/A'}`;
-      subtitle = item.description || 'Aucune description';
-      additionalInfo = item.labhrs ? `${item.labhrs}h` : '';
-      icon = 'check-circle';
-    } else if (category === "Main d'œuvre") {
-      title = item.laborcode || item.taskid || "Main d'œuvre";
-      subtitle = item.description || 'Aucune description';
-      additionalInfo = item.labhrs ? `${item.labhrs}h` : '';
-      icon = 'user';
-    } else if (category === 'Matériel') {
-      title = item.itemnum || 'N/A';
-      subtitle = item.description || 'Aucune description';
-      additionalInfo = item.quantity ? `Qté: ${item.quantity}` : '';
-      icon = 'box';
-    } else if (category === 'Documents') {
-      title = item.document || 'Document';
-      subtitle = item.description || 'Aucune description';
-      additionalInfo = item.createdate || '';
-      icon = 'file-text';
-    }
-
-    return (
-      <TouchableOpacity
-        key={index}
-        style={styles.itemCard}
-        onPress={() => openDetailModal(item)}
-        activeOpacity={0.7}
-      >
-        <View style={styles.itemHeader}>
-          <View style={styles.itemIcon}>
-            <FeatherIcon name={icon as any} size={20} color="#3b82f6" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.itemTitle} numberOfLines={1}>{title}</Text>
-            {additionalInfo ? <Text style={styles.itemInfo}>{additionalInfo}</Text> : null}
-          </View>
-        </View>
-        <Text style={styles.itemSubtitle} numberOfLines={2}>{subtitle}</Text>
-        <View style={styles.itemFooter} />
-      </TouchableOpacity>
-    );
-  };
-
-  const renderCategoryList = () => {
-    if (!selectedCategory) return null;
-    const data = getCategoryData(selectedCategory);
-
-    return (
-      <View style={styles.modalContent}>
-        <View style={styles.modalHeader}>
-          <View>
-            <Text style={styles.modalTitle}>{selectedCategory}</Text>
-            <Text style={styles.modalSubtitle}>{data.length} élément(s)</Text>
-          </View>
-          <TouchableOpacity onPress={closeModal} style={styles.closeButton}>
-            <FeatherIcon name="x" size={24} color="#64748b" />
-          </TouchableOpacity>
-        </View>
-
-        <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
-          {data.length === 0 ? (
-            <View style={styles.emptyModal}>
-              <FeatherIcon name="inbox" size={48} color="#cbd5e1" />
-              <Text style={styles.emptyModalText}>Aucun élément</Text>
-            </View>
-          ) : (
-            data.map((item, index) => renderItemCard(item, index, selectedCategory))
-          )}
-        </ScrollView>
-      </View>
-    );
-  };
-
-  if (authLoading) {
+  // ✅ ONLY AFTER all hooks are called, you may return conditionally
+  if (authLoading || loading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#3b82f6" />
-        <Text style={styles.loadingText}>Vérification session...</Text>
-      </View>
-    );
-  }
-
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#3b82f6" />
-        <Text style={styles.loadingText}>Chargement...</Text>
+        <Text style={styles.loadingText}>
+          {authLoading ? 'Vérification session...' : 'Chargement...'}
+        </Text>
       </View>
     );
   }
@@ -306,12 +199,23 @@ useFocusEffect(
         <View style={styles.categoryGrid}>
           {CATEGORIES.map(category => {
             const count = getCategoryCount(category.key);
+
             return (
               <TouchableOpacity
                 key={category.key}
                 style={styles.categoryCard}
                 activeOpacity={0.8}
-                onPress={() => openCategoryModal(category.key)}
+                onPress={() => {
+                  if (category.key === 'Activités') {
+                    navigation.navigate('DetailsActivities', { workOrder: details });
+                  } else if (category.key === "Main d'œuvre") {
+                    navigation.navigate('DetailsLabor', { workOrder: details });
+                  } else if (category.key === 'Matériel') {
+                    navigation.navigate('DetailsMaterials', { workOrder: details });
+                  } else if (category.key === 'Documents') {
+                    navigation.navigate('DetailsDocuments', { workOrder: details });
+                  }
+                }}
               >
                 <LinearGradient
                   colors={category.gradient as any}
@@ -330,19 +234,11 @@ useFocusEffect(
                     <Text style={styles.categoryCountText}>{count}</Text>
                   </View>
 
-                  {/* Bouton + masqué pour Activités */}
                   {category.key !== 'Activités' && (
                     <TouchableOpacity
-                      onPress={() => {
+                      onPress={(e) => {
+                        e.stopPropagation();
                         if (category.key === 'Matériel') {
-                          console.log('➡️ AddMaterial params:', {
-                            wonum: details.wonum,
-                            workorderid: details.workorderid,
-                            siteid: details.siteid,
-                            status: details.status,
-                            ishistory: details.ishistory,
-                          });
-
                           navigation.navigate('AddMaterial', {
                             wonum: details.wonum,
                             workorderid: details.workorderid,
@@ -350,18 +246,11 @@ useFocusEffect(
                             status: details.status,
                             ishistory: details.ishistory,
                           });
-
                         } else if (category.key === "Main d'œuvre") {
                           if (!details.workorderid || !details.siteid) {
                             Alert.alert('Erreur', 'workorderid / siteid manquant pour cet OT');
                             return;
                           }
-
-                          console.log('➡️ AddLabor params:', {
-                            workorderid: details.workorderid,
-                            siteid: details.siteid,
-                          });
-
                           navigation.navigate('AddLabor', {
                             workorderid: details.workorderid,
                             siteid: details.siteid,
@@ -371,13 +260,10 @@ useFocusEffect(
                             Alert.alert('Erreur', 'workorderid / siteid manquant pour cet OT');
                             return;
                           }
-
                           navigation.navigate('AddDoclink', {
                             ownerid: details.workorderid,
                             siteid: details.siteid,
                           });
-                        } else {
-                          onAddCategoryItem(category.key);
                         }
                       }}
                       style={styles.plusButton}
@@ -391,20 +277,10 @@ useFocusEffect(
           })}
         </View>
       </ScrollView>
-
-      <Modal visible={modalVisible} animationType="fade" transparent={true} onRequestClose={closeModal}>
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={closeModal} />
-          <View style={styles.modalContainer}>
-            {selectedItem ? null : renderCategoryList()}
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 }
 
-// Styles inchangés
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8fafc' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#1e3a8a' },
@@ -439,23 +315,4 @@ const styles = StyleSheet.create({
   categoryName: { fontSize: 16, fontWeight: '700', color: '#fff', marginTop: 12 },
   categoryCount: { position: 'absolute', top: 16, right: 16, backgroundColor: 'rgba(255, 255, 255, 0.3)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, minWidth: 32, alignItems: 'center' },
   categoryCountText: { fontSize: 14, fontWeight: '800', color: '#fff' },
-  modalOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0, 0, 0, 0.6)' },
-  modalBackdrop: { position: 'absolute', width: '100%', height: '100%' },
-  modalContainer: { width: '90%', maxHeight: '80%', backgroundColor: '#fff', borderRadius: 24, overflow: 'hidden' },
-  modalContent: { maxHeight: '100%' },
-  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 20, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
-  modalTitle: { fontSize: 22, fontWeight: '800', color: '#0f172a' },
-  modalSubtitle: { fontSize: 14, fontWeight: '600', color: '#64748b', marginTop: 4 },
-  closeButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f1f5f9', borderRadius: 12 },
-  modalBody: { padding: 20 },
-  itemCard: { backgroundColor: '#f8fafc', borderRadius: 16, padding: 16, marginBottom: 12 },
-  itemHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  itemIcon: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#eff6ff', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
-  itemTitle: { fontSize: 15, fontWeight: '700', color: '#0f172a' },
-  itemInfo: { fontSize: 12, fontWeight: '600', color: '#3b82f6', marginTop: 2 },
-  itemSubtitle: { fontSize: 13, color: '#64748b', lineHeight: 18, marginBottom: 8 },
-  itemFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end' },
-  itemLink: { fontSize: 13, fontWeight: '600', color: '#3b82f6', marginRight: 4 },
-  emptyModal: { alignItems: 'center', justifyContent: 'center', paddingVertical: 40 },
-  emptyModalText: { fontSize: 16, fontWeight: '600', color: '#94a3b8', marginTop: 12 },
 });

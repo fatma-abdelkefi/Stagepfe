@@ -6,7 +6,7 @@ import { getWorkOrderDetails } from '../services/workOrderDetailsService';
 export type ActivityItem = { taskid: string; description?: string; status?: string; labhrs?: number };
 export type LaborItem = { taskid: string; laborcode?: string; description?: string; labhrs?: number };
 export type MaterialItem = { taskid: string; itemnum?: string; description?: string; quantity?: number };
-export type DocLinkItem = { document?: string; description?: string; createdate?: string; urlname?: string };
+export type DocLinkItem = { document?: string; description?: string; createdate?: string; urlname?: string;docinfo?: any; };
 
 export type WPLaborItem = {
   taskid: string;

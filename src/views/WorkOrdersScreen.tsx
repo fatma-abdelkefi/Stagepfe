@@ -53,6 +53,8 @@ export default function WorkOrdersScreen() {
   const [showScanner, setShowScanner] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+
 
   const fetchData = async () => {
     try {
@@ -242,26 +244,38 @@ export default function WorkOrdersScreen() {
         style={styles.header}
       >
         <View style={styles.headerTop}>
-          <View style={styles.headerLeft}>
-            <LinearGradient
-              colors={['#3b82f6', '#1d4ed8']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.logoGradient}
-            >
-              <Text style={styles.logoText}>S</Text>
-            </LinearGradient>
-            <View>
-              <Text style={styles.greeting}>Bonjour</Text>
-              <Text style={styles.userName}>Smartech Team</Text>
-            </View>
-          </View>
+  <View style={styles.headerLeft}>
+    <LinearGradient
+      colors={['#3b82f6', '#1d4ed8']}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={styles.logoGradient}
+    >
+      <Text style={styles.logoText}>S</Text>
+    </LinearGradient>
+    <View>
+      <Text style={styles.greeting}>Bonjour</Text>
+      <Text style={styles.userName}>Smartech Team</Text>
+    </View>
+  </View>
 
-          <TouchableOpacity style={styles.notificationButton}>
-            <FeatherIcon name="bell" size={22} color="#fff" />
-            <View style={styles.notificationDot} />
-          </TouchableOpacity>
-        </View>
+  <View style={{ flexDirection: 'row', gap: 12 }}>
+    {/* Notification Button */}
+    <TouchableOpacity style={styles.notificationButton}>
+      <FeatherIcon name="bell" size={22} color="#fff" />
+      <View style={styles.notificationDot} />
+    </TouchableOpacity>
+
+    {/* Déconnexion Button */}
+    <TouchableOpacity 
+      style={styles.logoutButton}
+      onPress={() => setShowLogoutConfirm(true)}  // appel du logout depuis AuthContext
+    >
+      <FeatherIcon name="log-out" size={22} color="#fff" />
+    </TouchableOpacity>
+  </View>
+</View>
+
 
         <TouchableOpacity onPress={() => setOpenDatePicker(true)} activeOpacity={0.8}>
           <View style={styles.summaryCard}>
@@ -380,6 +394,39 @@ export default function WorkOrdersScreen() {
           />
         )}
       </View>
+      <Modal
+  visible={showLogoutConfirm}
+  transparent
+  animationType="fade"
+  onRequestClose={() => setShowLogoutConfirm(false)}
+>
+  <View style={styles.modalOverlay}>
+    <View style={styles.modalContainer}>
+      <Text style={styles.modalTitle}>Confirmer la déconnexion</Text>
+      <Text style={styles.modalMessage}>Êtes-vous sûr de vouloir vous déconnecter ?</Text>
+      
+      <View style={styles.modalButtons}>
+        <TouchableOpacity
+          style={[styles.modalButton, { backgroundColor: '#e5e7eb' }]}
+          onPress={() => setShowLogoutConfirm(false)}
+        >
+          <Text style={{ fontWeight: '600', color: '#1e293b' }}>Annuler</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity
+          style={[styles.modalButton, { backgroundColor: '#3b82f6' }]}
+          onPress={async () => {
+            setShowLogoutConfirm(false);
+            await logout();
+          }}
+        >
+          <Text style={{ fontWeight: '600', color: '#fff' }}>Confirmer</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  </View>
+</Modal>
+
     </SafeAreaView>
   );
 }
@@ -445,6 +492,43 @@ const styles = StyleSheet.create({
     borderWidth: 1, 
     borderColor: 'rgba(59, 130, 246, 0.1)' 
   },
+  modalOverlay: {
+  flex: 1,
+  backgroundColor: 'rgba(0,0,0,0.5)',
+  justifyContent: 'center',
+  alignItems: 'center',
+},
+modalContainer: {
+  width: '80%',
+  backgroundColor: '#fff',
+  borderRadius: 16,
+  padding: 24,
+  alignItems: 'center',
+},
+modalTitle: {
+  fontSize: 18,
+  fontWeight: '700',
+  marginBottom: 12,
+  color: '#0f172a',
+},
+modalMessage: {
+  fontSize: 14,
+  color: '#64748b',
+  textAlign: 'center',
+  marginBottom: 24,
+},
+modalButtons: {
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  width: '100%',
+  gap: 12,
+},
+modalButton: {
+  flex: 1,
+  paddingVertical: 12,
+  borderRadius: 12,
+  alignItems: 'center',
+},
   summaryLeft: { flex: 1 },
   summaryCount: { fontSize: 32, fontWeight: '900', color: '#0f172a', marginBottom: 2 },
   summaryLabel: { fontSize: 13, color: '#64748b', fontWeight: '600' },
@@ -647,6 +731,15 @@ const styles = StyleSheet.create({
   },
   retryButtonText: { fontSize: 16, fontWeight: '700', color: '#fff' },
   
+  logoutButton: {
+  width: 44,
+  height: 44,
+  backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  borderRadius: 12,
+  alignItems: 'center',
+  justifyContent: 'center',
+},
+
   // Empty State
   emptyState: { 
     flex: 1, 

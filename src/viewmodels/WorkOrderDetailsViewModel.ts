@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getWorkOrderDetails } from '../services/workOrderDetailsService';
+import { getWorkOrderDetails, getDoclinkDetailsByHref } from '../services/workOrderDetailsService';
 import type { WorkOrder, ActivityItem, LaborItem, MaterialItem, DocLinkItem } from './WorkOrdersViewModel';
 
 export function parseLabHrs(labhrs: string | number | undefined | null): number {
@@ -10,23 +10,61 @@ export function parseLabHrs(labhrs: string | number | undefined | null): number 
   return (parts[0] || 0) + (parts[1] ? parts[1] / 60 : 0);
 }
 
+function looksLikeId(v?: string) {
+  const s = String(v || '').trim();
+  return !!s && /^\d+$/.test(s);
+}
+
+function getHref(doc: any) {
+  return String(doc?.href || doc?.urlname || '');
+}
+
 export function useWorkOrderDetails(wonum: string) {
   const [workOrder, setWorkOrder] = useState<WorkOrder | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);      // first load only
-  const [refreshing, setRefreshing] = useState<boolean>(false); // focus refresh
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const inFlightRef = useRef(false);
   const firstLoadDoneRef = useRef(false);
 
-  const fetchDetails = useCallback(async (mode: 'initial' | 'refresh' = 'initial') => {
-    if (inFlightRef.current) return; // ✅ prevent loop
+  const enrichDocLinks = useCallback(async (details: WorkOrder, username: string, password: string) => {
+    const docs: DocLinkItem[] = details.docLinks ?? [];
+    if (!docs.length) return details;
+
+    // Only enrich docs with missing metadata
+    const needs = docs
+      .map((d, idx) => ({ d, idx, href: getHref(d) }))
+      .filter(x => !!x.href && (looksLikeId(x.d.document) || !String(x.d.createdate || '').trim()));
+
+    if (!needs.length) return details;
+
+    // Fetch with a small concurrency (avoid server overload)
+    const updated = [...docs];
+
+    for (const n of needs) {
+      const extra = await getDoclinkDetailsByHref(n.href, username, password);
+      if (!extra) continue;
+
+      updated[n.idx] = {
+        ...updated[n.idx],
+        document: extra.document || updated[n.idx].document,
+        description: extra.description || updated[n.idx].description,
+        createdate: extra.createdate || updated[n.idx].createdate,
+        urlname: extra.urlname || updated[n.idx].urlname,
+        href: extra.href || (updated[n.idx] as any).href,
+      } as any;
+    }
+
+    return { ...details, docLinks: updated };
+  }, []);
+
+  const fetchDetails = useCallback(async (mode: 'initial' | 'refresh') => {
+    if (inFlightRef.current) return;
     inFlightRef.current = true;
 
     try {
-      if (mode === 'initial') setLoading(true);
-      else setRefreshing(true);
-
+      mode === 'initial' ? setLoading(true) : setRefreshing(true);
       setError(null);
 
       const username = await AsyncStorage.getItem('@username');
@@ -34,16 +72,10 @@ export function useWorkOrderDetails(wonum: string) {
       if (!username || !password) throw new Error('Identifiants non trouvés');
 
       const details = await getWorkOrderDetails(wonum, username, password);
-      if (!details || typeof details !== 'object') {
-        setWorkOrder(null);
-        setError("Impossible de charger les détails de cet ordre de travail.");
-        return;
-      }
+      if (!details) throw new Error("Impossible de charger les détails de cet ordre de travail.");
 
       const normalized: WorkOrder = {
         ...details,
-
-        // ✅ guarantee required WorkOrder fields
         locationDescription: details.locationDescription ?? '',
 
         activities: (details.activities ?? []).map((a: any): ActivityItem => ({
@@ -67,31 +99,29 @@ export function useWorkOrderDetails(wonum: string) {
           quantity: Number(m.quantity ?? 0),
         })),
 
-        docLinks: (details.docLinks ?? []).map((d: any): DocLinkItem => ({
-          document: d.document ?? '',
-          description: d.description ?? '',
-          createdate: d.createdate ?? '',
-          urlname: d.urlname ?? '',
-        })),
+        docLinks: details.docLinks ?? [],
       };
 
+      // Show quickly first
       setWorkOrder(normalized);
       firstLoadDoneRef.current = true;
-    } catch (err: any) {
+
+      // Then enrich metadata
+      const enriched = await enrichDocLinks(normalized, username, password);
+      setWorkOrder(enriched);
+    } catch (e: any) {
       setWorkOrder(null);
-      setError(err?.message || 'Une erreur est survenue lors du chargement.');
+      setError(e?.message || 'Une erreur est survenue lors du chargement.');
     } finally {
-      if (mode === 'initial') setLoading(false);
-      else setRefreshing(false);
+      mode === 'initial' ? setLoading(false) : setRefreshing(false);
       inFlightRef.current = false;
     }
-  }, [wonum]);
+  }, [wonum, enrichDocLinks]);
 
   useEffect(() => {
     fetchDetails('initial');
   }, [fetchDetails]);
 
-  // ✅ refresh only when screen focused AND initial already done AND not in flight
   const refresh = useCallback(() => {
     if (!firstLoadDoneRef.current) return;
     if (inFlightRef.current) return;
