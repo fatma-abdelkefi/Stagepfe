@@ -1,4 +1,3 @@
-// src/services/materialService.ts
 import axios from 'axios';
 import { Buffer } from 'buffer';
 
@@ -38,9 +37,6 @@ function commonHeaders(maxauth: string) {
   };
 }
 
-/**
- * Resolve from woKey (wonum OR workorderid) -> returns workorderid, siteid, status, ishistory
- */
 export async function resolveWorkOrderIdAndSite({
   woKey,
   username,
@@ -73,7 +69,6 @@ export async function resolveWorkOrderIdAndSite({
     return res.data.member?.[0] ?? null;
   };
 
-  // heuristic: if numeric, could be workorderid OR wonum
   let wo: MaximoWO | null = null;
 
   wo = await tryByWorkOrderId();
@@ -92,12 +87,6 @@ export async function resolveWorkOrderIdAndSite({
   };
 }
 
-/**
- * POST (MERGE PATCH override) exactly like Postman:
- * POST /SM1122/{workorderid}?lean=1
- * headers: x-method-override=PATCH, patchtype=MERGE
- * body: { wpmaterial: [ ... ] }
- */
 export async function addMaterialToWorkOrder({
   workorderid,
   username,
@@ -120,7 +109,7 @@ const body = {
     {
       description: material.description,
       itemnum: material.itemnum,
-      itemqty: material.quantity, // ✅ use itemqty
+      itemqty: material.quantity, 
       location: material.location,
       barcode: material.barcode || undefined,
       ...(siteid ? { siteid } : {}),
@@ -135,7 +124,6 @@ const body = {
     patchtype: 'MERGE',
   };
 
-  // IMPORTANT logs
   console.log('🚀 [addMaterial] URL:', url);
   console.log('🚀 [addMaterial] Headers:', headers);
   console.log('🚀 [addMaterial] Body:', JSON.stringify(body, null, 2));

@@ -1,22 +1,31 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getWorkOrderDetails, getDoclinkDetailsByHref } from '../services/workOrderDetailsService';
-import type { WorkOrder, ActivityItem, LaborItem, MaterialItem, DocLinkItem } from './WorkOrdersViewModel';
 
-export function parseLabHrs(labhrs: string | number | undefined | null): number {
-  if (!labhrs) return 0;
-  if (typeof labhrs === 'number') return labhrs;
-  const parts = String(labhrs).split(':').map(Number);
-  return (parts[0] || 0) + (parts[1] ? parts[1] / 60 : 0);
+import {
+  getWorkOrderDetails,
+  getDoclinkDetailsByHref,
+  getDoclinkMetaByHref,
+} from '../services/workOrderDetailsService';
+
+import type { WorkOrder, DocLinkItem } from './WorkOrdersViewModel';
+
+function safeStr(v: any): string {
+  return typeof v === 'string' ? v.trim() : '';
 }
 
-function looksLikeId(v?: string) {
-  const s = String(v || '').trim();
-  return !!s && /^\d+$/.test(s);
+function isGenericDesc(desc: string) {
+  const d = safeStr(desc).toLowerCase();
+  return !d || d === 'aucune description';
 }
 
-function getHref(doc: any) {
-  return String(doc?.href || doc?.urlname || '');
+function needsMoreInfo(doc: any) {
+  const created = safeStr(doc?.createdate);
+  const desc = safeStr(doc?.description);
+
+  if (!created) return true;
+  if (isGenericDesc(desc)) return true;
+
+  return false;
 }
 
 export function useWorkOrderDetails(wonum: string) {
@@ -28,95 +37,113 @@ export function useWorkOrderDetails(wonum: string) {
   const inFlightRef = useRef(false);
   const firstLoadDoneRef = useRef(false);
 
-  const enrichDocLinks = useCallback(async (details: WorkOrder, username: string, password: string) => {
-    const docs: DocLinkItem[] = details.docLinks ?? [];
-    if (!docs.length) return details;
+  const applyExtra = (current: any, extra: any) => {
+    const next: any = { ...current };
+    if (safeStr(extra?.document)) next.document = extra.document;
+    if (safeStr(extra?.description)) next.description = extra.description;
+    if (safeStr(extra?.createdate)) next.createdate = extra.createdate;
+    if (safeStr(extra?.urlname)) next.urlname = extra.urlname;
+    if (safeStr(extra?.href)) next.href = extra.href;
+    return next;
+  };
 
-    // Only enrich docs with missing metadata
-    const needs = docs
-      .map((d, idx) => ({ d, idx, href: getHref(d) }))
-      .filter(x => !!x.href && (looksLikeId(x.d.document) || !String(x.d.createdate || '').trim()));
+  const enrichDocLinks = useCallback(
+    async (details: WorkOrder, username: string, password: string) => {
+      const docs: DocLinkItem[] = (details as any)?.docLinks ?? [];
 
-    if (!needs.length) return details;
+      console.log('==============================');
+      console.log('✨ [enrichDocLinks] docs length:', docs.length);
 
-    // Fetch with a small concurrency (avoid server overload)
-    const updated = [...docs];
+      if (!docs.length) {
+        console.log('✨ [enrichDocLinks] no docs -> skip');
+        console.log('==============================');
+        return details;
+      }
 
-    for (const n of needs) {
-      const extra = await getDoclinkDetailsByHref(n.href, username, password);
-      if (!extra) continue;
+      const updated = [...docs];
 
-      updated[n.idx] = {
-        ...updated[n.idx],
-        document: extra.document || updated[n.idx].document,
-        description: extra.description || updated[n.idx].description,
-        createdate: extra.createdate || updated[n.idx].createdate,
-        urlname: extra.urlname || updated[n.idx].urlname,
-        href: extra.href || (updated[n.idx] as any).href,
-      } as any;
-    }
+      for (let i = 0; i < docs.length; i++) {
+        const d: any = docs[i];
 
-    return { ...details, docLinks: updated };
-  }, []);
+        console.log('------------------------------');
+        console.log(`✨ [enrichDocLinks] doc[${i}] title:`, d?.document);
+        console.log(`✨ [enrichDocLinks] doc[${i}] href:`, d?.href);
+        console.log(`✨ [enrichDocLinks] doc[${i}] describedByHref:`, d?.describedByHref);
+        console.log(`✨ [enrichDocLinks] doc[${i}] createdate:`, d?.createdate);
+        console.log(`✨ [enrichDocLinks] doc[${i}] description:`, d?.description);
 
-  const fetchDetails = useCallback(async (mode: 'initial' | 'refresh') => {
-    if (inFlightRef.current) return;
-    inFlightRef.current = true;
+        const hrefToUse =
+          safeStr(d?.href) ||
+          safeStr(d?.urlname) ||
+          safeStr(d?.describedByHref) ||
+          '';
 
-    try {
-      mode === 'initial' ? setLoading(true) : setRefreshing(true);
-      setError(null);
+        const needs = !!hrefToUse && needsMoreInfo(d);
+        console.log(`✨ [enrichDocLinks] doc[${i}] needsMore:`, needs);
+        if (!needs) continue;
 
-      const username = await AsyncStorage.getItem('@username');
-      const password = await AsyncStorage.getItem('@password');
-      if (!username || !password) throw new Error('Identifiants non trouvés');
+        // 1) Try /doclinks/{id}
+        const extra1 = await getDoclinkDetailsByHref(hrefToUse, username, password);
+        console.log(`✨ [enrichDocLinks] doc[${i}] extra1(doclinks):`, extra1);
 
-      const details = await getWorkOrderDetails(wonum, username, password);
-      if (!details) throw new Error("Impossible de charger les détails de cet ordre de travail.");
+        let nextDoc: any = { ...updated[i] };
+        if (extra1) nextDoc = applyExtra(nextDoc, extra1);
 
-      const normalized: WorkOrder = {
-        ...details,
-        locationDescription: details.locationDescription ?? '',
+        // If still missing description, try meta endpoint
+        const stillMissing =
+          isGenericDesc(safeStr(nextDoc?.description)) && isGenericDesc(safeStr(extra1?.description));
 
-        activities: (details.activities ?? []).map((a: any): ActivityItem => ({
-          taskid: String(a.taskid ?? ''),
-          description: a.description ?? '',
-          status: a.status ?? '',
-          labhrs: a.labhrs ?? 0,
-        })),
+        if (stillMissing) {
+          const extra2 = await getDoclinkMetaByHref(hrefToUse, username, password);
+          console.log(`✨ [enrichDocLinks] doc[${i}] extra2(meta):`, extra2);
+          if (extra2) nextDoc = applyExtra(nextDoc, extra2);
+        }
 
-        labor: (details.labor ?? []).map((l: any): LaborItem => ({
-          taskid: String(l.taskid ?? ''),
-          laborcode: l.laborcode ?? '',
-          description: l.description ?? '',
-          labhrs: parseLabHrs(l.labhrs),
-        })),
+        updated[i] = nextDoc;
+      }
 
-        materials: (details.materials ?? []).map((m: any): MaterialItem => ({
-          taskid: String(m.taskid ?? ''),
-          itemnum: m.itemnum ?? '',
-          description: m.description ?? '',
-          quantity: Number(m.quantity ?? 0),
-        })),
+      console.log('==============================');
+      return { ...details, docLinks: updated as any };
+    },
+    []
+  );
 
-        docLinks: details.docLinks ?? [],
-      };
+  const fetchDetails = useCallback(
+    async (mode: 'initial' | 'refresh') => {
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
 
-      // Show quickly first
-      setWorkOrder(normalized);
-      firstLoadDoneRef.current = true;
+      console.log('==============================');
+      console.log('📲 [useWorkOrderDetails] fetchDetails mode:', mode);
+      console.log('📲 [useWorkOrderDetails] wonum:', wonum);
+      console.log('==============================');
 
-      // Then enrich metadata
-      const enriched = await enrichDocLinks(normalized, username, password);
-      setWorkOrder(enriched);
-    } catch (e: any) {
-      setWorkOrder(null);
-      setError(e?.message || 'Une erreur est survenue lors du chargement.');
-    } finally {
-      mode === 'initial' ? setLoading(false) : setRefreshing(false);
-      inFlightRef.current = false;
-    }
-  }, [wonum, enrichDocLinks]);
+      try {
+        mode === 'initial' ? setLoading(true) : setRefreshing(true);
+        setError(null);
+
+        const username = await AsyncStorage.getItem('@username');
+        const password = await AsyncStorage.getItem('@password');
+        if (!username || !password) throw new Error('Identifiants non trouvés');
+
+        const details = await getWorkOrderDetails(wonum, username, password);
+        if (!details) throw new Error("Impossible de charger les détails de cet ordre de travail.");
+
+        setWorkOrder(details);
+        firstLoadDoneRef.current = true;
+
+        const enriched = await enrichDocLinks(details, username, password);
+        setWorkOrder(enriched);
+      } catch (e: any) {
+        setWorkOrder(null);
+        setError(e?.message || 'Une erreur est survenue lors du chargement.');
+      } finally {
+        mode === 'initial' ? setLoading(false) : setRefreshing(false);
+        inFlightRef.current = false;
+      }
+    },
+    [wonum, enrichDocLinks]
+  );
 
   useEffect(() => {
     fetchDetails('initial');
@@ -128,21 +155,5 @@ export function useWorkOrderDetails(wonum: string) {
     fetchDetails('refresh');
   }, [fetchDetails]);
 
-  const formatDate = (dateStr?: string | null): string => {
-    if (!dateStr) return 'Non planifié';
-    const date = new Date(dateStr);
-    if (isNaN(date.getTime())) return 'Date invalide';
-    return date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
-  };
-
-  const calculateDuration = (start?: string | null, end?: string | null): string => {
-    if (!start || !end) return 'N/A';
-    const diffMs = new Date(end).getTime() - new Date(start).getTime();
-    if (isNaN(diffMs)) return 'N/A';
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-    const diffDays = Math.floor(diffHours / 24);
-    return diffDays > 0 ? `${diffDays}j ${diffHours % 24}h` : `${diffHours}h`;
-  };
-
-  return { workOrder, loading, refreshing, error, formatDate, calculateDuration, refresh };
+  return { workOrder, loading, refreshing, error, refresh };
 }

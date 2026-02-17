@@ -1,4 +1,5 @@
-import React from 'react';
+// src/views/DocDetailsScreen.tsx
+import React, { useMemo } from 'react';
 import {
   View,
   Text,
@@ -7,12 +8,14 @@ import {
   SafeAreaView,
   TouchableOpacity,
   Alert,
-  Linking,
 } from 'react-native';
 import { RouteProp, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import FeatherIcon from 'react-native-vector-icons/Feather';
+import LinearGradient from 'react-native-linear-gradient';
+
 import { RootStackParamList } from '../navigation/AppNavigator';
+import { rewriteDoclinkUrl, metaToDoclinkUrl } from '../services/workOrderDetailsService';
 
 type Props = {
   route: RouteProp<RootStackParamList, 'DocDetails'>;
@@ -24,149 +27,149 @@ function safeStr(v: any): string {
   return typeof v === 'string' ? v.trim() : '';
 }
 
-function pickDocInfo(item: any): any {
-  const di = item?.docinfo;
-  if (Array.isArray(di?.member) && di.member.length) return di.member[0];
-  if (di && typeof di === 'object') return di;
-  return null;
-}
-
-function getLink(item: any): string {
-  const di = pickDocInfo(item);
-  return (
+function getOpenUrl(item: any): string {
+  const raw =
     safeStr(item?.href) ||
-    safeStr(di?.href) ||
+    safeStr(item?.docinfo?.href) ||
     safeStr(item?.urlname) ||
-    safeStr(di?.urlname) ||
-    ''
-  );
-}
+    safeStr(item?.docinfo?.urlname) ||
+    '';
 
-function filenameFromUrl(url: string): string {
-  if (!url) return '';
-  const clean = url.split('?')[0].split('#')[0];
-  const last = clean.split('/').pop() || '';
-  return last ? decodeURIComponent(last) : '';
+  const fixed = rewriteDoclinkUrl(metaToDoclinkUrl(raw));
+  if (!fixed) return '';
+
+  // si on a un doclinkId, on force ".../doclinks/{id}"
+  const id = safeStr(item?.doclinkId);
+  if (id) {
+    return fixed
+      .replace(/\/doclinks\/meta\/\d+/i, `/doclinks/${id}`)
+      .replace(/\/doclinks\/\d+\/meta/i, `/doclinks/${id}`);
+  }
+
+  return fixed;
 }
 
 function getDocName(item: any): string {
-  const di = pickDocInfo(item);
-  const title =
-    safeStr(di?.doctitle) ||
-    safeStr(di?.title) ||
-    safeStr(item?.doctitle) ||
-    safeStr(item?.title);
+  let name = safeStr(item?.document);
 
-  const doc = safeStr(di?.document) || safeStr(item?.document);
-  const link = getLink(item);
-  const file = filenameFromUrl(link);
+  if (name && !name.match(/^\d+$/)) return name;
 
-  return title || doc || file || 'Document sans nom';
+  const alternatives = [
+    safeStr(item?.describedByDesc),
+    safeStr(item?.docinfo?.document),
+    safeStr(item?.docinfo?.doctitle),
+    safeStr(item?.docinfo?.title),
+    safeStr(item?.urlname)?.split('/').pop()?.split('?')[0],
+    safeStr(item?.href)?.split('/').pop()?.split('?')[0],
+  ];
+
+  for (const alt of alternatives) {
+    if (alt && !alt.match(/^\d+$/) && alt.length > 0) {
+      return decodeURIComponent(alt);
+    }
+  }
+
+  return name || 'Sans nom';
 }
 
 function getDescription(item: any): string {
-  const di = pickDocInfo(item);
-  return safeStr(di?.description) || safeStr(item?.description) || 'Aucune description fournie';
-}
+  const desc = safeStr(item?.description);
+  if (desc && desc.toLowerCase() !== 'aucune description') return desc;
 
-function getCreateDate(item: any): string {
-  const di = pickDocInfo(item);
-  return (
-    safeStr(di?.createdate) ||
-    safeStr(item?.createdate) ||
-    safeStr(di?.creationdate) ||
-    safeStr(item?.creationdate) ||
-    'Date non disponible'
-  );
+  const desc2 = safeStr(item?.docinfo?.description);
+  if (desc2 && desc2.toLowerCase() !== 'aucune description') return desc2;
+
+  return 'Aucune description';
 }
 
 export default function DocDetailsScreen({ route }: Props) {
   const navigation = useNavigation<NavigationProp>();
   const { document } = route.params;
 
-  const url = getLink(document);
-  const docName = getDocName(document);
-  const description = getDescription(document);
-  const createdDate = getCreateDate(document);
+  const url = useMemo(() => getOpenUrl(document), [document]);
+  const nomDocument = useMemo(() => getDocName(document), [document]);
+  const description = useMemo(() => getDescription(document), [document]);
 
-  const handleOpen = async () => {
+  // ✅ DIRECT: open in WebView screen (no download)
+  const handleOpen = () => {
     if (!url) {
       Alert.alert('Erreur', 'Aucun lien disponible pour ce document');
       return;
     }
 
-    try {
-      const ok = await Linking.canOpenURL(url);
-      if (!ok) {
-        Alert.alert('Erreur', "Impossible d'ouvrir ce lien");
-        return;
-      }
-      await Linking.openURL(url);
-    } catch {
-      Alert.alert('Erreur', "Impossible d'ouvrir le document");
-    }
+    // Navigate to DocViewer and pass the entire document object
+    // DocViewer will rebuild url + attach auth headers + handle redirects
+    navigation.navigate('DocViewer' as any, { document });
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
+      <LinearGradient
+        colors={['#3b82f6', '#2563eb', '#1e40af']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.header}
+      >
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <FeatherIcon name="chevron-left" size={28} color="#fff" />
+          <FeatherIcon name="arrow-left" size={22} color="#fff" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={1}>
-          {docName}
-        </Text>
-        <View style={{ width: 40 }} />
-      </View>
+        <Text style={styles.headerTitle}>Détails du document</Text>
+        <View style={{ width: 42 }} />
+      </LinearGradient>
 
-      <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
-        <View style={styles.previewCard}>
-          <FeatherIcon name="file-text" size={64} color="#6366f1" />
-          <Text style={styles.previewName} numberOfLines={2}>
-            {docName}
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={styles.contentContainer}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.heroCard}>
+          <View style={styles.heroIcon}>
+            <FeatherIcon name="file-text" size={40} color="#3b82f6" />
+          </View>
+          <Text style={styles.heroTitle} numberOfLines={2}>
+            {nomDocument}
           </Text>
-          <Text style={styles.previewId}>{url ? `ID: ${filenameFromUrl(url)}` : '—'}</Text>
         </View>
 
-        <View style={styles.detailsCard}>
-          <Text style={styles.sectionTitle}>Détails du document</Text>
-
-          <View style={styles.detailRow}>
-            <Text style={styles.label}>Nom du document</Text>
-            <Text style={styles.value} numberOfLines={2}>
-              {docName}
-            </Text>
-          </View>
-
-          <View style={styles.detailRow}>
-            <Text style={styles.label}>Description</Text>
-            <Text style={styles.value}>{description}</Text>
-          </View>
-
-          <View style={styles.detailRow}>
-            <Text style={styles.label}>Date de création</Text>
-            <Text style={styles.value}>{createdDate}</Text>
-          </View>
-
-          {url ? (
-            <View style={styles.detailRow}>
-              <Text style={styles.label}>Lien</Text>
-              <Text style={[styles.value, styles.link]} numberOfLines={3}>
-                {url}
-              </Text>
+        <View style={styles.infoCards}>
+          <View style={styles.infoCard}>
+            <View style={styles.infoCardHeader}>
+              <View style={styles.infoIconWrapper}>
+                <FeatherIcon name="file-text" size={18} color="#3b82f6" />
+              </View>
+              <Text style={styles.infoCardTitle}>Nom de document</Text>
             </View>
-          ) : null}
+            <Text style={styles.infoCardValue}>{nomDocument}</Text>
+          </View>
+
+          <View style={styles.infoCard}>
+            <View style={styles.infoCardHeader}>
+              <View style={styles.infoIconWrapper}>
+                <FeatherIcon name="align-left" size={18} color="#3b82f6" />
+              </View>
+              <Text style={styles.infoCardTitle}>Description</Text>
+            </View>
+            <Text style={styles.infoCardValue}>{description}</Text>
+          </View>
         </View>
 
         <TouchableOpacity
-          style={[styles.openButton, !url && styles.openButtonDisabled]}
           onPress={handleOpen}
           disabled={!url}
+          activeOpacity={0.85}
+          style={styles.actionButton}
         >
-          <FeatherIcon name="external-link" size={20} color="#fff" />
-          <Text style={styles.openButtonText}>
-            {url ? 'Ouvrir le document' : 'Lien non disponible'}
-          </Text>
+          <LinearGradient
+            colors={url ? ['#3b82f6', '#2563eb'] : ['#cbd5e1', '#94a3b8']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.actionGradient}
+          >
+            <FeatherIcon name="external-link" size={20} color="#fff" />
+            <Text style={styles.actionText}>
+              {url ? 'Afficher le document' : 'Lien non disponible'}
+            </Text>
+          </LinearGradient>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
@@ -174,69 +177,99 @@ export default function DocDetailsScreen({ route }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f9fafb' },
+  container: { flex: 1, backgroundColor: '#f1f5f9' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    backgroundColor: '#6366f1',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 20,
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
+    shadowColor: '#3b82f6',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 8,
   },
-  backBtn: { padding: 8 },
-  headerTitle: {
-    flex: 1,
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#fff',
-    textAlign: 'center',
-    marginHorizontal: 16,
+  backBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  scroll: { flex: 1, padding: 16 },
-  previewCard: {
+  headerTitle: { fontSize: 18, fontWeight: '800', color: '#fff', letterSpacing: 0.3 },
+  content: { flex: 1 },
+  contentContainer: { padding: 20, paddingBottom: 40 },
+  heroCard: {
     backgroundColor: '#ffffff',
-    borderRadius: 16,
-    padding: 24,
+    borderRadius: 24,
+    padding: 32,
     alignItems: 'center',
     marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
+    shadowColor: '#64748b',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 4,
   },
-  previewName: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 4,
-    textAlign: 'center',
+  heroIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: 20,
+    backgroundColor: '#eff6ff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
   },
-  previewId: { fontSize: 15, color: '#6b7280' },
-  detailsCard: {
+  heroTitle: { fontSize: 20, fontWeight: '800', color: '#0f172a', textAlign: 'center' },
+  infoCards: { gap: 14, marginBottom: 20 },
+  infoCard: {
     backgroundColor: '#ffffff',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 24,
-    shadowColor: '#000',
+    borderRadius: 18,
+    padding: 16,
+    shadowColor: '#64748b',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.08,
     shadowRadius: 8,
-    elevation: 3,
+    elevation: 2,
   },
-  sectionTitle: { fontSize: 17, fontWeight: '700', color: '#111827', marginBottom: 16 },
-  detailRow: { marginBottom: 16 },
-  label: { fontSize: 14, color: '#6b7280', marginBottom: 4 },
-  value: { fontSize: 16, color: '#111827', lineHeight: 22 },
-  link: { color: '#6366f1', textDecorationLine: 'underline' },
-  openButton: {
+  infoCardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  infoIconWrapper: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#eff6ff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  infoCardTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#64748b',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  infoCardValue: { fontSize: 16, fontWeight: '600', color: '#0f172a', lineHeight: 24 },
+  actionButton: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    shadowColor: '#3b82f6',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  actionGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#6366f1',
-    paddingVertical: 16,
-    borderRadius: 12,
-    gap: 10,
+    paddingVertical: 18,
+    gap: 12,
   },
-  openButtonDisabled: { backgroundColor: '#d1d5db' },
-  openButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  actionText: { fontSize: 17, fontWeight: '800', color: '#fff', letterSpacing: 0.3 },
 });

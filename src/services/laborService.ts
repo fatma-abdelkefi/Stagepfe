@@ -1,4 +1,3 @@
-// src/services/laborService.ts
 import axios from 'axios';
 import { Buffer } from 'buffer';
 
@@ -24,7 +23,6 @@ export async function addLaborToWorkOrder(params: {
   const body = {
     wplabor: [
       {
-        // ✅ REQUIRED by Maximo for MERGE on this object structure
         wplaborid: String(Date.now()),
 
         laborcode: labor.laborcode,

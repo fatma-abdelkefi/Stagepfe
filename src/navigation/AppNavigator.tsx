@@ -13,6 +13,7 @@ import DetailsActivitiesScreen from '../views/DetailsActivitiesScreen';
 import DetailsLaborScreen from '../views/DetailsLaborScreen';
 import DetailsMaterialsScreen from '../views/DetailsMaterialsScreen';
 import DetailsDocumentsScreen from '../views/DetailsDocumentsScreen';
+import DocViewerScreen from '../views/DocViewerScreen';
 
 // Add screens
 import AddMaterialScreen from '../views/AddMaterialScreen';
@@ -35,6 +36,7 @@ export type RootStackParamList = {
   DetailsMaterials: { workOrder: WorkOrder };
   DetailsDocuments: { workOrder: WorkOrder };
   DocDetails: { document: any };
+  DocViewer: { document: any };
 
   // Add screens
   AddLabor: {
@@ -95,6 +97,8 @@ export default function AppNavigator() {
           <Stack.Screen name="DetailsMaterials" component={DetailsMaterialsScreen} />
           <Stack.Screen name="DetailsDocuments" component={DetailsDocumentsScreen} />
           <Stack.Screen name="DocDetails" component={DocDetailsScreen}/>
+          <Stack.Screen name="DocViewer" component={DocViewerScreen} />
+
           {/* Add screens */}
           <Stack.Screen name="AddLabor" component={AddLaborScreen} />
           <Stack.Screen name="AddMaterial" component={AddMaterialScreen} />

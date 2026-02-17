@@ -95,10 +95,8 @@ export async function getWorkOrders(username: string, password: string): Promise
         isDynamic: false,
         dynamicJobPlanApplied: false,
 
-        // ✅ keep old UI field
         site: item.siteid ?? '',
 
-        // ✅ new fields
         siteid: item.siteid ?? undefined,
         workorderid: item.workorderid ?? undefined,
         ishistory: item.ishistory ?? undefined,
@@ -117,10 +115,6 @@ export async function getWorkOrders(username: string, password: string): Promise
     throw error;
   }
 }
-
-/* =======================
-   FETCH DETAILS (1 WO)
-======================= */
 
 export async function getWorkOrderDetails(
   wonum: string,

@@ -2,7 +2,6 @@ import axios from 'axios';
 
 const VALIDATE_URL = 'http://demo2.smartech-tn.com/maximo/oslc/os/mxwo?lean=1&oslc.select=wonum&oslc.pageSize=1';
 
-// Fonction compatible React Native
 function makeMaxAuth(username: string, password: string): string {
   return btoa(`${username.trim()}:${password.trim()}`);
 }
@@ -24,8 +23,7 @@ export async function login(username: string, password: string): Promise<{ ok: b
     Accept: 'application/json',
   };
 
-  console.log('DEBUG: MAXAUTH token =', token); // <- log to compare with Postman
-
+  console.log('DEBUG: MAXAUTH token =', token); 
   try {
     const res = await axios.get(VALIDATE_URL, { headers, timeout: 15000 });
     if (res.status === 200) {
