@@ -1,5 +1,7 @@
 import axios from 'axios';
-import { Buffer } from 'buffer';
+
+import { MAXIMO } from '../config/maximoUrls';
+import { makeToken } from './maximoClient';
 
 export interface LaborInput {
   laborcode: string;
@@ -16,15 +18,15 @@ export async function addLaborToWorkOrder(params: {
 }) {
   const { workorderid, siteid, username, password, labor } = params;
 
-  const token = Buffer.from(`${username}:${password}`).toString('base64');
+  const token = makeToken(username, password);
 
-  const url = `http://demo2.smartech-tn.com/maximo/oslc/os/SM1120/${workorderid}?lean=1`;
+  // ✅ centralized base
+  const url = `${MAXIMO.OSLC_OS}/SM1120/${workorderid}?lean=1`;
 
   const body = {
     wplabor: [
       {
         wplaborid: String(Date.now()),
-
         laborcode: labor.laborcode,
         laborhrs: labor.laborhrs,
         quantity: labor.quantity ?? 1,
@@ -36,7 +38,11 @@ export async function addLaborToWorkOrder(params: {
   const headers = {
     Accept: 'application/json',
     'Content-Type': 'application/json',
+
+    MAXAUTH: token,
+    Authorization: `Basic ${token}`,
     maxauth: `Basic ${token}`,
+
     properties: '*',
     'x-method-override': 'PATCH',
     patchtype: 'MERGE',

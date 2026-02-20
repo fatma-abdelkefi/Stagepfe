@@ -6,54 +6,20 @@ import FileViewer from 'react-native-file-viewer';
 import { Buffer } from 'buffer';
 import { Platform } from 'react-native';
 
-import { rewriteDoclinkUrl, doclinkToMetaUrl, metaToDoclinkUrl } from './workOrderDetailsService';
-
-const makeMaxAuth = (u: string, p: string) =>
-  Buffer.from(`${u}:${p}`).toString('base64');
+import { makeToken } from './maximoClient';
+import {
+  rewriteDoclinkUrl,
+  doclinkToMetaUrl,
+  metaToDoclinkUrl,
+  finalNormalizeMaximoUrl,
+} from './doclinks';
 
 function safeStr(v: any): string {
   return typeof v === 'string' ? v.trim() : '';
 }
 
 function ensureNoTrailingSlash(u: string) {
-  return u.replace(/\/+$/, '');
-}
-
-/** Fix server typos we saw in logs */
-function fixKnownTypos(u: string) {
-  return (u || '')
-    .replace(/\/os\/mmxwo\//i, '/os/mxwo/')
-    .replace(/\/os\/mxwwo\//i, '/os/mxwo/')
-    .replace(/docclinks/gi, 'doclinks')
-    // ✅ fix /mxwo/__Qk... => /mxwo/_Qk...
-    .replace(/\/mxwo\/__+/i, '/mxwo/_');
-}
-
-function forceSameHost(url: string, referenceUrl: string) {
-  try {
-    const ref = new URL(referenceUrl);
-    const u = new URL(url);
-    u.protocol = ref.protocol;
-    u.host = ref.host;
-    return u.toString();
-  } catch {
-    return url;
-  }
-}
-
-function normalizeCommon(rawUrl: string, referenceUrl: string) {
-  const base = rewriteDoclinkUrl(rawUrl);
-  const fixed = ensureNoTrailingSlash(base);
-  const sameHost = forceSameHost(fixed, referenceUrl);
-  return fixKnownTypos(sameHost);
-}
-
-function normalizeBinaryBaseUrl(rawUrl: string, referenceUrl: string) {
-  return fixKnownTypos(metaToDoclinkUrl(normalizeCommon(rawUrl, referenceUrl)));
-}
-
-function normalizeMetaUrl(rawUrl: string, referenceUrl: string) {
-  return fixKnownTypos(doclinkToMetaUrl(normalizeCommon(rawUrl, referenceUrl)));
+  return (u || '').replace(/\/+$/, '');
 }
 
 function extFromContentType(ct?: string) {
@@ -73,10 +39,7 @@ function extFromContentType(ct?: string) {
 }
 
 function sanitizeFileName(name: string) {
-  const cleaned = (name || '')
-    .replace(/[\\/:*?"<>|]+/g, '_')
-    .replace(/\s+/g, ' ')
-    .trim();
+  const cleaned = (name || '').replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim();
   return cleaned.length ? cleaned : `document_${Date.now()}`;
 }
 
@@ -84,7 +47,7 @@ function looksLikeJsonBytes(buf: ArrayBuffer) {
   try {
     const u8 = new Uint8Array(buf);
     const first = Array.from(u8.slice(0, 60))
-      .map(b => String.fromCharCode(b))
+      .map((b) => String.fromCharCode(b))
       .join('')
       .trimStart();
     return first.startsWith('{') || first.startsWith('[');
@@ -94,7 +57,7 @@ function looksLikeJsonBytes(buf: ArrayBuffer) {
 }
 
 function buildCandidateUrls(doclinkBase: string) {
-  const base = ensureNoTrailingSlash(doclinkBase);
+  const base = ensureNoTrailingSlash(finalNormalizeMaximoUrl(doclinkBase));
   if (!base) return [];
   return [
     base,
@@ -106,7 +69,7 @@ function buildCandidateUrls(doclinkBase: string) {
     `${base}/attachment`,
     `${base}/content/$value`,
     `${base}/$value`,
-  ];
+  ].map(finalNormalizeMaximoUrl);
 }
 
 async function tryDownloadBinary(url: string, token: string) {
@@ -166,7 +129,6 @@ async function fetchMeta(metaUrl: string, token: string) {
  * - fallback to ExternalDirectoryPath, then Cache
  */
 async function pickAndroidWriteDir() {
-  // RNFS.DownloadDirectoryPath may be undefined on some setups
   const dlp = (RNFS as any).DownloadDirectoryPath as string | undefined;
   if (dlp) return dlp;
 
@@ -180,12 +142,10 @@ export async function downloadAndOpenDoclink(
   password: string,
   preferredName?: string
 ): Promise<boolean> {
-  const token = makeMaxAuth(username, password);
+  const token = makeToken(username, password);
 
   const referenceUrl =
-    typeof input === 'string'
-      ? input
-      : safeStr(input?.href) || safeStr(input?.urlname) || '';
+    typeof input === 'string' ? input : safeStr(input?.href) || safeStr(input?.urlname) || '';
 
   if (!referenceUrl) return false;
 
@@ -207,53 +167,63 @@ export async function downloadAndOpenDoclink(
   console.log('==============================');
   console.log('📦 [downloadAndOpenDoclink] raw urls:', uniqueRaw);
 
-  // 1) Build candidates from raw
+  // 1) Build candidates from raw URLs (normalized centrally)
   const candidates: string[] = [];
   for (const ru of uniqueRaw) {
-    const binBase = normalizeBinaryBaseUrl(ru, referenceUrl);
+    // make absolute + fix /maximo/maximo, mxwoo, mxwwo, //
+    const abs = rewriteDoclinkUrl(ru);
+
+    // binary base
+    const binBase = metaToDoclinkUrl(abs);
+
+    // candidates
     candidates.push(...buildCandidateUrls(binBase));
   }
 
-  const uniqCandidates = Array.from(new Set(candidates));
+  const uniqCandidates = Array.from(new Set(candidates.map(finalNormalizeMaximoUrl)));
+
   console.log('📦 [downloadAndOpenDoclink] candidates:', uniqCandidates);
 
   let downloaded: { data: ArrayBuffer; contentType?: string } | null = null;
   let usedUrl = '';
 
   for (const u of uniqCandidates) {
-    const fixedU = fixKnownTypos(u);
-    const attempt = await tryDownloadBinary(fixedU, token);
+    const attempt = await tryDownloadBinary(u, token);
     if (attempt) {
       downloaded = attempt;
-      usedUrl = fixedU;
+      usedUrl = u;
       break;
     }
   }
 
-  // 2) if still fail => try meta then rebuild candidates from meta->binary base
+  // 2) If still fail => try meta then rebuild candidates using identifier
   let meta: any | null = null;
   if (!downloaded) {
     for (const ru of uniqueRaw) {
-      const metaUrl = normalizeMetaUrl(ru, referenceUrl);
+      const abs = rewriteDoclinkUrl(ru);
+      const metaUrl = finalNormalizeMaximoUrl(doclinkToMetaUrl(abs));
       meta = await fetchMeta(metaUrl, token);
       if (meta) break;
     }
 
     if (meta?.identifier) {
-      // take first usable mxwo url from raw, normalize and force /doclinks/{id}
-      const any = uniqueRaw[0] || referenceUrl;
-      const base = normalizeBinaryBaseUrl(any, referenceUrl)
-        .replace(/\/doclinks\/meta\/\d+$/i, `/doclinks/${meta.identifier}`)
-        .replace(/\/doclinks\/\d+\/meta$/i, `/doclinks/${meta.identifier}`);
+      const anyUrl = uniqueRaw[0] || referenceUrl;
+      const abs = rewriteDoclinkUrl(anyUrl);
 
-      const cand2 = buildCandidateUrls(base);
+      // use identifier to force /doclinks/{id}
+      const forcedBase = finalNormalizeMaximoUrl(
+        metaToDoclinkUrl(abs)
+          .replace(/\/doclinks\/meta\/\d+$/i, `/doclinks/${meta.identifier}`)
+          .replace(/\/doclinks\/\d+\/meta$/i, `/doclinks/${meta.identifier}`)
+      );
+
+      const cand2 = buildCandidateUrls(forcedBase);
 
       for (const u of cand2) {
-        const fixedU = fixKnownTypos(u);
-        const attempt = await tryDownloadBinary(fixedU, token);
+        const attempt = await tryDownloadBinary(u, token);
         if (attempt) {
           downloaded = attempt;
-          usedUrl = fixedU;
+          usedUrl = u;
           break;
         }
       }
@@ -271,18 +241,13 @@ export async function downloadAndOpenDoclink(
   const baseName = sanitizeFileName(preferredName || safeStr(meta?.title) || 'document');
   const fileName = baseName.toLowerCase().endsWith(`.${ext}`) ? baseName : `${baseName}.${ext}`;
 
-  const dir =
-    Platform.OS === 'android'
-      ? await pickAndroidWriteDir()
-      : RNFS.DocumentDirectoryPath;
-
+  const dir = Platform.OS === 'android' ? await pickAndroidWriteDir() : RNFS.DocumentDirectoryPath;
   const path = `${dir}/${fileName}`;
 
   const b64 = Buffer.from(downloaded.data as any).toString('base64');
   await RNFS.writeFile(path, b64, 'base64');
 
   try {
-    // ✅ simpler open options (some builds reject options object)
     await FileViewer.open(path, { showOpenWithDialog: true });
 
     console.log('✅ [downloadAndOpenDoclink] usedUrl:', usedUrl);

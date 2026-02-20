@@ -1,5 +1,7 @@
 import axios from 'axios';
-import { Buffer } from 'buffer';
+
+import { MAXIMO } from '../config/maximoUrls';
+import { makeToken } from './maximoClient';
 
 export type MaterialInput = {
   description: string;
@@ -21,10 +23,8 @@ type MaximoWOResponse = {
   member?: MaximoWO[];
 };
 
-const BASE_URL = 'http://demo2.smartech-tn.com/maximo/oslc/os';
-
 function buildMaxAuth(username: string, password: string) {
-  const token = Buffer.from(`${username}:${password}`).toString('base64');
+  const token = makeToken(username, password);
   return `Basic ${token}`;
 }
 
@@ -52,7 +52,7 @@ export async function resolveWorkOrderIdAndSite({
   const select = 'wonum,siteid,workorderid,status,ishistory';
 
   const tryByWorkOrderId = async () => {
-    const url = `${BASE_URL}/mxwo?lean=1&oslc.where=workorderid=${encodeURIComponent(
+    const url = `${MAXIMO.OSLC_OS}/mxwo?lean=1&oslc.where=workorderid=${encodeURIComponent(
       key
     )}&oslc.select=${select}`;
     console.log('🔎 [resolve] tryByWorkOrderId URL:', url);
@@ -61,7 +61,7 @@ export async function resolveWorkOrderIdAndSite({
   };
 
   const tryByWonum = async () => {
-    const url = `${BASE_URL}/mxwo?lean=1&oslc.where=wonum="${encodeURIComponent(
+    const url = `${MAXIMO.OSLC_OS}/mxwo?lean=1&oslc.where=wonum="${encodeURIComponent(
       key
     )}"&oslc.select=${select}`;
     console.log('🔎 [resolve] tryByWonum URL:', url);
@@ -102,21 +102,20 @@ export async function addMaterialToWorkOrder({
 }) {
   const maxauth = buildMaxAuth(username, password);
 
-  const url = `${BASE_URL}/SM1122/${workorderid}?lean=1`;
+  const url = `${MAXIMO.OSLC_OS}/SM1122/${workorderid}?lean=1`;
 
-const body = {
-  wpmaterial: [
-    {
-      description: material.description,
-      itemnum: material.itemnum,
-      itemqty: material.quantity, 
-      location: material.location,
-      barcode: material.barcode || undefined,
-      ...(siteid ? { siteid } : {}),
-    },
-  ],
-};
-
+  const body = {
+    wpmaterial: [
+      {
+        description: material.description,
+        itemnum: material.itemnum,
+        itemqty: material.quantity,
+        location: material.location,
+        barcode: material.barcode || undefined,
+        ...(siteid ? { siteid } : {}),
+      },
+    ],
+  };
 
   const headers = {
     ...commonHeaders(maxauth),

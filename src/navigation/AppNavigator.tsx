@@ -8,11 +8,12 @@ import LoginScreen from '../views/LoginScreen';
 import WorkOrdersScreen from '../views/WorkOrdersScreen';
 import WorkOrderDetailsScreen from '../views/WorkOrderDetailsScreen';
 
-// New detail screens for categories
+// Detail screens
 import DetailsActivitiesScreen from '../views/DetailsActivitiesScreen';
 import DetailsLaborScreen from '../views/DetailsLaborScreen';
 import DetailsMaterialsScreen from '../views/DetailsMaterialsScreen';
 import DetailsDocumentsScreen from '../views/DetailsDocumentsScreen';
+import DocDetailsScreen from '../views/DocDetailsScreen';
 import DocViewerScreen from '../views/DocViewerScreen';
 
 // Add screens
@@ -20,13 +21,13 @@ import AddMaterialScreen from '../views/AddMaterialScreen';
 import AddLaborScreen from '../views/AddLaborScreen';
 import AddDoclinkScreen from '../views/AddDoclinkScreen';
 
-import { WorkOrder } from '../viewmodels/WorkOrdersViewModel'; // adjust path if needed
+import type { WorkOrder } from '../viewmodels/WorkOrdersViewModel';
 import { useAuth } from '../context/AuthContext';
 
-import DocDetailsScreen from '../views/DocDetailsScreen';
 export type RootStackParamList = {
   Launch: undefined;
   Login: undefined;
+
   WorkOrders: undefined;
   WorkOrderDetails: { workOrder: WorkOrder };
 
@@ -35,6 +36,8 @@ export type RootStackParamList = {
   DetailsLabor: { workOrder: WorkOrder };
   DetailsMaterials: { workOrder: WorkOrder };
   DetailsDocuments: { workOrder: WorkOrder };
+
+  // Documents screens
   DocDetails: { document: any };
   DocViewer: { document: any };
 
@@ -45,6 +48,7 @@ export type RootStackParamList = {
     onSuccess?: () => void;
     onRefresh?: () => void;
   };
+
   AddMaterial: {
     wonum: string;
     workorderid?: number;
@@ -52,6 +56,7 @@ export type RootStackParamList = {
     status?: string;
     ishistory?: boolean;
   };
+
   AddDoclink: {
     ownerid: number;
     siteid: string;
@@ -73,19 +78,14 @@ export default function AppNavigator() {
   const { username, password, authLoading } = useAuth();
   const isLoggedIn = !!username && !!password;
 
-  if (authLoading) {
-    return <Splash />;
-  }
+  if (authLoading) return <Splash />;
 
   return (
-    <Stack.Navigator
-      screenOptions={{ headerShown: false }}
-      initialRouteName="Launch"
-    >
+    <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName="Launch">
       {/* Always available */}
       <Stack.Screen name="Launch" component={LaunchScreen} />
 
-      {/* Conditional rendering based on auth state */}
+      {/* Auth */}
       {isLoggedIn ? (
         <>
           <Stack.Screen name="WorkOrders" component={WorkOrdersScreen} />
@@ -96,7 +96,9 @@ export default function AppNavigator() {
           <Stack.Screen name="DetailsLabor" component={DetailsLaborScreen} />
           <Stack.Screen name="DetailsMaterials" component={DetailsMaterialsScreen} />
           <Stack.Screen name="DetailsDocuments" component={DetailsDocumentsScreen} />
-          <Stack.Screen name="DocDetails" component={DocDetailsScreen}/>
+
+          {/* Documents */}
+          <Stack.Screen name="DocDetails" component={DocDetailsScreen} />
           <Stack.Screen name="DocViewer" component={DocViewerScreen} />
 
           {/* Add screens */}

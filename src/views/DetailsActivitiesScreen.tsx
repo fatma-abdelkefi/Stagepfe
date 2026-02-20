@@ -1,68 +1,201 @@
 // src/views/DetailsActivitiesScreen.tsx
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   ScrollView,
   SafeAreaView,
   TouchableOpacity,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
+
 import { RouteProp, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import FeatherIcon from 'react-native-vector-icons/Feather';
 import { RootStackParamList } from '../navigation/AppNavigator';
+
+import { AppIcon, AppText, Icons } from '../ui';
+import { useAuth } from '../context/AuthContext';
+import StatusChangeModal from '../components/StatusChangeModal';
+
+import { DEFAULT_ACTIVITY_DOMAIN_ID, FR_BY_CODE } from '../services/statusService';
+
+type Activity = {
+  taskid?: number | string;
+  description?: string;
+  labhrs?: number | string;
+  status?: string;
+  statut?: string;
+  href?: string | { href?: string };
+  _href?: string;
+  siteid?: string;
+  wonum?: string;
+  workorderid?: number;
+  [k: string]: any;
+};
 
 type Props = {
   route: RouteProp<RootStackParamList, 'DetailsActivities'>;
 };
 
-type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'DetailsActivities'>;
+type NavigationProp = NativeStackNavigationProp<
+  RootStackParamList,
+  'DetailsActivities'
+>;
+
+function getHref(activity: Activity | null | undefined): string {
+  if (!activity) return '';
+  const h = activity.href;
+
+  if (typeof h === 'string') return h.trim();
+  if (h && typeof h === 'object' && typeof h.href === 'string') return h.href.trim();
+  if (typeof activity._href === 'string') return activity._href.trim();
+  return '';
+}
+
+function labelFR(code?: string): string {
+  const c = String(code || '').trim();
+  return FR_BY_CODE[c] || c || '-';
+}
 
 export default function DetailsActivitiesScreen({ route }: Props) {
   const navigation = useNavigation<NavigationProp>();
   const { workOrder } = route.params;
-  const activities = workOrder?.activities ?? [];
+  const { username, password } = useAuth();
+
+  const [activities, setActivities] = useState<Activity[]>(
+    (workOrder?.activities ?? []) as Activity[]
+  );
+
+  const [statusModalVisible, setStatusModalVisible] = useState(false);
+  const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
+  const [opening, setOpening] = useState(false);
+
+  const countText = useMemo(() => {
+    const n = activities.length;
+    return `${n} activité${n !== 1 ? 's' : ''}`;
+  }, [activities.length]);
+
+  const openChangeStatus = async (activity: Activity) => {
+    if (!username || !password) {
+      Alert.alert('Erreur', 'Identifiants manquants');
+      return;
+    }
+
+    const href = getHref(activity);
+    if (!href) {
+      Alert.alert('Erreur', "href manquant pour cette activité");
+      return;
+    }
+
+    setOpening(true);
+    setSelectedActivity(activity);
+    setStatusModalVisible(true);
+    setOpening(false);
+  };
+
+  const selectedHref = getHref(selectedActivity);
+  const selectedStatus = String(selectedActivity?.status ?? selectedActivity?.statut ?? '').trim();
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <FeatherIcon name="arrow-left" size={24} color="#fff" />
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={styles.backButton}
+          activeOpacity={0.9}
+        >
+          <AppIcon name={Icons.back} size={24} color="#fff" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Activités - #{workOrder?.wonum}</Text>
+
+        <AppText style={styles.headerTitle}>Activités - #{workOrder?.wonum}</AppText>
         <View style={{ width: 44 }} />
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {activities.length === 0 ? (
           <View style={styles.emptyContainer}>
-            <FeatherIcon name="inbox" size={64} color="#cbd5e1" />
-            <Text style={styles.emptyText}>Aucune activité pour cet ordre de travail</Text>
+            <AppIcon name={Icons.inbox} size={64} color="#cbd5e1" />
+            <AppText style={styles.emptyText}>
+              Aucune activité pour cet ordre de travail
+            </AppText>
           </View>
         ) : (
           <View style={styles.listContainer}>
-            <Text style={styles.sectionInfo}>
-              {activities.length} activité{activities.length !== 1 ? 's' : ''}
-            </Text>
+            <AppText style={styles.sectionInfo}>{countText}</AppText>
 
-            {activities.map((item: any, index: number) => (
-              <View key={index} style={styles.itemCard}>
-                <View style={styles.itemHeader}>
-                  <View style={styles.iconContainer}>
-                    <FeatherIcon name="check-circle" size={24} color="#3b82f6" />
+            {activities.map((item: Activity, index: number) => {
+              const statusCode = String(item?.status ?? item?.statut ?? '').trim();
+              const statusLabel = labelFR(statusCode);
+
+              return (
+                <View key={`${item.taskid ?? 'na'}_${index}`} style={styles.itemCard}>
+                  <View style={styles.itemHeader}>
+                    <View style={styles.iconContainer}>
+                      <AppIcon name={Icons.checkCircle} size={24} color="#3b82f6" />
+                    </View>
+
+                    <View style={{ flex: 1 }}>
+                      <AppText style={styles.title}>
+                        Activité {item.taskid || 'N/A'}
+                      </AppText>
+
+                      {!!item.labhrs && (
+                        <AppText style={styles.subtitle}>Durée : {item.labhrs} h</AppText>
+                      )}
+
+                      <AppText style={styles.statusLine}>
+                        Statut : <AppText style={styles.statusValue}>{statusLabel}</AppText>
+                      </AppText>
+                    </View>
+
+                    <TouchableOpacity
+                      onPress={() => openChangeStatus(item)}
+                      style={styles.changeBtn}
+                      activeOpacity={0.85}
+                      disabled={opening}
+                    >
+                      {opening && selectedActivity?.taskid === item?.taskid ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <AppText style={styles.changeBtnText}>Changer</AppText>
+                      )}
+                    </TouchableOpacity>
                   </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.title}>Activité {item.taskid || 'N/A'}</Text>
-                    {item.labhrs && <Text style={styles.subtitle}>Durée : {item.labhrs} h</Text>}
-                  </View>
+
+                  <AppText style={styles.description}>
+                    {item.description || 'Aucune description'}
+                  </AppText>
                 </View>
-                <Text style={styles.description}>{item.description || 'Aucune description'}</Text>
-              </View>
-            ))}
+              );
+            })}
           </View>
         )}
       </ScrollView>
+
+      {/* ✅ ALWAYS render modal (no conditional mount) */}
+      <StatusChangeModal
+        visible={statusModalVisible}
+        entityType="ACTIVITY"
+        currentStatus={selectedStatus}
+        href={selectedHref}                 // ✅ empty string when null -> safe
+        username={username || ''}
+        password={password || ''}
+        activityDomainId={DEFAULT_ACTIVITY_DOMAIN_ID}
+        onClose={() => setStatusModalVisible(false)}
+        onSuccess={({ code }) => {
+          if (!selectedActivity) return;
+
+          setActivities((prev) =>
+            prev.map((a) =>
+              String(a?.taskid) === String(selectedActivity?.taskid)
+                ? { ...a, status: code, statut: code }
+                : a
+            )
+          );
+          Alert.alert('Succès', `Statut activité changé vers : ${labelFR(code)}`);
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -107,7 +240,12 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 2,
   },
-  itemHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  itemHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+    gap: 12,
+  },
   iconContainer: {
     width: 48,
     height: 48,
@@ -115,22 +253,25 @@ const styles = StyleSheet.create({
     backgroundColor: '#eff6ff',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
   },
   title: { fontSize: 16, fontWeight: '700', color: '#0f172a' },
-  subtitle: { fontSize: 14, color: '#3b82f6', marginTop: 4, fontWeight: '600' },
-  description: { fontSize: 15, color: '#334155', lineHeight: 22 },
-  emptyContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 120,
-  },
-  emptyText: {
-    marginTop: 16,
-    fontSize: 16,
+  subtitle: {
+    fontSize: 14,
+    color: '#3b82f6',
+    marginTop: 4,
     fontWeight: '600',
-    color: '#94a3b8',
-    textAlign: 'center',
   },
+  statusLine: { marginTop: 6, fontSize: 13, color: '#64748b', fontWeight: '700' },
+  statusValue: { color: '#0f172a', fontWeight: '900' },
+  changeBtn: {
+    backgroundColor: '#3b82f6',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+  },
+  changeBtnText: { color: '#fff', fontWeight: '900', fontSize: 12 },
+  description: { fontSize: 15, color: '#334155', lineHeight: 22 },
+  emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 120 },
+  emptyText: { marginTop: 16, fontSize: 16, fontWeight: '600', color: '#94a3b8', textAlign: 'center' },
 });

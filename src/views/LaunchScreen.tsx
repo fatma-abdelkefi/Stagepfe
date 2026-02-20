@@ -14,87 +14,63 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAuth } from '../context/AuthContext';
 
-type LaunchScreenNavigationProp = NativeStackNavigationProp<
-  RootStackParamList,
-  'Launch'
->;
+type LaunchScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Launch'>;
 
 export default function LaunchScreen() {
   const navigation = useNavigation<LaunchScreenNavigationProp>();
   const { username, password, authLoading } = useAuth();
-
   const isLoggedIn = !!username && !!password;
 
-  // Animation values
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const scaleAnim = useRef(new Animated.Value(0.3)).current;
+  // ✅ DEBUG LOGS — share these with us
+  console.log('🚀 [LaunchScreen] authLoading:', authLoading);
+  console.log('🚀 [LaunchScreen] isLoggedIn:', isLoggedIn);
+  console.log('🚀 [LaunchScreen] username:', username);
+
+  const fadeAnim   = useRef(new Animated.Value(0)).current;
+  const scaleAnim  = useRef(new Animated.Value(0.3)).current;
   const slideUpAnim = useRef(new Animated.Value(50)).current;
-  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const pulseAnim  = useRef(new Animated.Value(1)).current;
   const rotateAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // Start animations
     Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 1000,
-        useNativeDriver: true,
-      }),
-      Animated.spring(scaleAnim, {
-        toValue: 1,
-        tension: 10,
-        friction: 3,
-        useNativeDriver: true,
-      }),
-      Animated.timing(slideUpAnim, {
-        toValue: 0,
-        duration: 800,
-        delay: 300,
-        useNativeDriver: true,
-      }),
+      Animated.timing(fadeAnim, { toValue: 1, duration: 1000, useNativeDriver: true }),
+      Animated.spring(scaleAnim, { toValue: 1, tension: 10, friction: 3, useNativeDriver: true }),
+      Animated.timing(slideUpAnim, { toValue: 0, duration: 800, delay: 300, useNativeDriver: true }),
     ]).start();
 
     Animated.loop(
       Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 1.1,
-          duration: 1000,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulseAnim, {
-          toValue: 1,
-          duration: 1000,
-          useNativeDriver: true,
-        }),
+        Animated.timing(pulseAnim, { toValue: 1.1, duration: 1000, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1,   duration: 1000, useNativeDriver: true }),
       ])
     ).start();
-    
-    Animated.loop(
-      Animated.timing(rotateAnim, {
-        toValue: 1,
-        duration: 10000,
-        useNativeDriver: true,
-      })
-    ).start();
-  }, [fadeAnim, scaleAnim, slideUpAnim, pulseAnim, rotateAnim]);
 
-      useEffect(() => {
+    Animated.loop(
+      Animated.timing(rotateAnim, { toValue: 1, duration: 10000, useNativeDriver: true })
+    ).start();
+  }, []);
+
+  // ✅ KEY FIX: wait for authLoading before navigating
+  useEffect(() => {
+    console.log('🚀 [LaunchScreen] nav effect — authLoading:', authLoading, 'isLoggedIn:', isLoggedIn);
+    if (authLoading) {
+      console.log('🚀 [LaunchScreen] waiting for auth...');
+      return;
+    }
     const timer = setTimeout(() => {
       if (isLoggedIn) {
+        console.log('🚀 [LaunchScreen] → WorkOrders');
         navigation.replace('WorkOrders');
       } else {
+        console.log('🚀 [LaunchScreen] → Login');
         navigation.replace('Login');
       }
     }, 2000);
-
     return () => clearTimeout(timer);
-  }, [navigation, isLoggedIn]);
+  }, [navigation, isLoggedIn, authLoading]);
 
-
-  const spin = rotateAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0deg', '360deg'],
-  });
+  const spin = rotateAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
 
   return (
     <LinearGradient
@@ -105,50 +81,24 @@ export default function LaunchScreen() {
     >
       <StatusBar barStyle="light-content" backgroundColor="#000000" />
 
+      <Animated.View style={[styles.circle1, { transform: [{ rotate: spin }, { scale: pulseAnim }] }]} />
       <Animated.View
-        style={[
-          styles.circle1,
-          { transform: [{ rotate: spin }, { scale: pulseAnim }] },
-        ]}
-      />
-      <Animated.View
-        style={[
-          styles.circle2,
-          {
-            transform: [
-              { rotate: spin },
-              {
-                scale: pulseAnim.interpolate({
-                  inputRange: [1, 1.1],
-                  outputRange: [1.1, 1],
-                }),
-              },
-            ],
-          },
-        ]}
+        style={[styles.circle2, {
+          transform: [
+            { rotate: spin },
+            { scale: pulseAnim.interpolate({ inputRange: [1, 1.1], outputRange: [1.1, 1] }) },
+          ],
+        }]}
       />
 
       <View style={styles.content}>
-        <Animated.View
-          style={[
-            styles.logoContainer,
-            { opacity: fadeAnim, transform: [{ scale: scaleAnim }] },
-          ]}
-        >
+        <Animated.View style={[styles.logoContainer, { opacity: fadeAnim, transform: [{ scale: scaleAnim }] }]}>
           <View style={styles.logoGlow}>
-            <Image
-              source={require('../assets/smartech_logo.png')}
-              style={styles.logo}
-            />
+            <Image source={require('../assets/smartech_logo.png')} style={styles.logo} />
           </View>
         </Animated.View>
 
-        <Animated.View
-          style={[
-            styles.textContainer,
-            { opacity: fadeAnim, transform: [{ translateY: slideUpAnim }] },
-          ]}
-        >
+        <Animated.View style={[styles.textContainer, { opacity: fadeAnim, transform: [{ translateY: slideUpAnim }] }]}>
           <Text style={styles.subtitle}>Smartech Eam Experts</Text>
         </Animated.View>
       </View>
@@ -160,35 +110,16 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   circle1: {
-    position: 'absolute',
-    width: 300,
-    height: 300,
-    borderRadius: 150,
-    backgroundColor: 'rgba(59, 130, 246, 0.1)',
-    top: -100,
-    right: -100,
+    position: 'absolute', width: 300, height: 300, borderRadius: 150,
+    backgroundColor: 'rgba(59, 130, 246, 0.1)', top: -100, right: -100,
   },
   circle2: {
-    position: 'absolute',
-    width: 400,
-    height: 400,
-    borderRadius: 200,
-    backgroundColor: 'rgba(37, 99, 235, 0.1)',
-    bottom: -150,
-    left: -150,
+    position: 'absolute', width: 400, height: 400, borderRadius: 200,
+    backgroundColor: 'rgba(37, 99, 235, 0.1)', bottom: -150, left: -150,
   },
   logoContainer: { marginBottom: 40 },
-  logoGlow: {
-    padding: 30,
-    borderRadius: 100,
-    backgroundColor: 'rgba(59, 130, 246, 0.15)',
-  },
+  logoGlow: { padding: 30, borderRadius: 100, backgroundColor: 'rgba(59, 130, 246, 0.15)' },
   logo: { width: 240, height: 240, resizeMode: 'contain' },
   textContainer: { alignItems: 'center' },
-  subtitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#93c5fd',
-    letterSpacing: 2,
-  },
+  subtitle: { fontSize: 18, fontWeight: '600', color: '#93c5fd', letterSpacing: 2 },
 });

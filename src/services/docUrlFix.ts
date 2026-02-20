@@ -1,22 +1,24 @@
 // src/services/docUrlFix.ts
 
-type RewriteFn = (u?: string) => string;
-type MetaToBinFn = (u?: string) => string;
-
-function safeStr(v: any): string {
+function safeStr(v: any) {
   return typeof v === 'string' ? v.trim() : '';
 }
 
-/** Fix typos seen in Maximo URLs */
-export function fixKnownTypos(u: string) {
-  return (u || '')
-    .replace(/\/os\/mmxwo\//i, '/os/mxwo/')
-    .replace(/\/os\/mxwwo\//i, '/os/mxwo/')
-    .replace(/docclinks/gi, 'doclinks')
-    .replace(/\/mxwo\/__+/i, '/mxwo/_'); // /mxwo/__Qk... => /mxwo/_Qk...
+function ensureNoTrailingSlash(u: string) {
+  return (u || '').replace(/\/+$/, '');
 }
 
-/** Force host/protocol of `url` to match `referenceUrl` (demo2.smartech-tn.com) */
+/** Fix all typos we saw from Maximo */
+export function fixMaximoUrlTypos(u: string) {
+  return (u || '')
+    .replace(/\/oslc\/oss\//gi, '/oslc/os/') // ✅ FIX: oss -> os
+    .replace(/\/os\/mmxwo\//gi, '/os/mxwo/')
+    .replace(/\/os\/mxwwo\//gi, '/os/mxwo/')
+    .replace(/docclinks/gi, 'doclinks')
+    .replace(/\/mxwo\/__+/gi, '/mxwo/_'); // ✅ __ -> _
+}
+
+/** Force same protocol + host as referenceUrl */
 export function forceSameHost(url: string, referenceUrl: string) {
   try {
     const ref = new URL(referenceUrl);
@@ -30,52 +32,65 @@ export function forceSameHost(url: string, referenceUrl: string) {
 }
 
 /**
- * Build the best "binary doclink" URL:
- * - uses href/urlname/docinfo
- * - rewrite host to your external host
- * - convert meta -> binary
+ * Normalize ANY navigation URL:
  * - fix typos
- * - if doclinkId exists, enforce /doclinks/{id}
+ * - force host same as reference
+ * - remove trailing slash
+ */
+export function normalizeNavigationUrl(nextUrl: string, referenceUrl: string) {
+  const n = safeStr(nextUrl);
+  if (!n) return '';
+
+  const fixed = fixMaximoUrlTypos(n);
+  const sameHost = forceSameHost(fixed, referenceUrl);
+  return ensureNoTrailingSlash(sameHost);
+}
+
+/**
+ * Build the doclinks/{id} binary base from any doc item.
+ * rewriteDoclinkUrl + metaToDoclinkUrl are your functions from workOrderDetailsService.
  */
 export function buildBinaryDoclinkUrl(
-  document: any,
-  rewriteDoclinkUrl: RewriteFn,
-  metaToDoclinkUrl: MetaToBinFn
-): string {
+  doc: any,
+  rewriteDoclinkUrl: (u?: string) => string,
+  metaToDoclinkUrl: (u?: string) => string
+) {
   const raw =
-    safeStr(document?.href) ||
-    safeStr(document?.docinfo?.href) ||
-    safeStr(document?.urlname) ||
-    safeStr(document?.docinfo?.urlname) ||
+    safeStr(doc?.href) ||
+    safeStr(doc?.docinfo?.href) ||
+    safeStr(doc?.urlname) ||
+    safeStr(doc?.docinfo?.urlname) ||
     '';
 
-  if (!raw) return '';
+  const rewritten = rewriteDoclinkUrl(raw);
+  const binary = metaToDoclinkUrl(rewritten);
 
-  // reference host = from raw if possible
-  const referenceUrl = rewriteDoclinkUrl(raw) || raw;
-
-  let url = rewriteDoclinkUrl(raw);
-  url = metaToDoclinkUrl(url);
-  url = fixKnownTypos(url);
-  url = forceSameHost(url, referenceUrl);
-
-  const id = safeStr(document?.doclinkId);
+  // If doclinkId exists, force /doclinks/{id}
+  const id = safeStr(doc?.doclinkId);
+  let forced = binary;
   if (id) {
-    url = url
+    forced = forced
       .replace(/\/doclinks\/meta\/\d+/i, `/doclinks/${id}`)
       .replace(/\/doclinks\/\d+\/meta/i, `/doclinks/${id}`);
   }
 
-  return url;
+  return normalizeNavigationUrl(forced, rewritten || forced);
 }
 
-/**
- * Rewrite ANY navigation URL (redirects, images, pdf, etc.) to stay on the external host
- * + fix Maximo typos.
- */
-export function normalizeNavigationUrl(nextUrl: string, referenceUrl: string) {
-  let u = fixKnownTypos(nextUrl);
-  u = forceSameHost(u, referenceUrl);
-  u = fixKnownTypos(u);
-  return u;
+/** Build candidates for WebView */
+export function buildDocViewerCandidates(binaryBase: string) {
+  const base = ensureNoTrailingSlash(fixMaximoUrlTypos(binaryBase));
+  if (!base) return [];
+
+  return [
+    base,
+    `${base}?download=1`,
+    `${base}?_format=application/octet-stream`,
+    `${base}/$file`,
+    `${base}/file`,
+    `${base}/content`,
+    `${base}/attachment`,
+    `${base}/content/$value`,
+    `${base}/$value`,
+  ].map(fixMaximoUrlTypos);
 }

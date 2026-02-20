@@ -1,8 +1,10 @@
 import axios from 'axios';
-import { Buffer } from 'buffer';
 import { WorkOrder } from '../viewmodels/WorkOrdersViewModel';
 
-const BASE_URL = 'http://demo2.smartech-tn.com/maximo/oslc/os/mxwo';
+import { MAXIMO } from '../config/maximoUrls';
+import { makeToken } from './maximoClient';
+
+const BASE_URL = `${MAXIMO.OSLC_OS}/mxwo`;
 
 interface MaximoResponse {
   member?: any[];
@@ -28,6 +30,7 @@ interface MaximoWorkOrderItem {
   targstartdate?: string;
   scheduledfinish?: string;
 }
+
 interface MaximoWorkOrderDetails extends MaximoWorkOrderItem {
   worktype?: string;
   glaccount?: string;
@@ -37,36 +40,35 @@ interface MaximoWorkOrderDetails extends MaximoWorkOrderItem {
   failclass?: string;
   problemcode?: string;
 }
-function makeMaxAuth(username: string, password: string): string {
-  try {
-    return btoa(`${username}:${password}`);
-  } catch {
-    return Buffer.from(`${username}:${password}`).toString('base64');
-  }
-}
 
 export async function getWorkOrders(username: string, password: string): Promise<WorkOrder[]> {
   try {
-    const token = makeMaxAuth(username, password);
+    const token = makeToken(username, password);
 
     const res = await axios.get<MaximoResponse>(BASE_URL, {
       headers: {
         MAXAUTH: token,
+        Authorization: `Basic ${token}`,
         Accept: 'application/json',
       },
       params: {
         lean: 1,
         savedQuery: 'WOTRACK:OWNER IS ME',
         'oslc.select':
-        'wonum,description,status,' +
-        'assetnum,asset.description,' +
-        'location,locationdescription,' +
-        'priority,siteid,workorderid,ishistory,' +
-        'scheduledstart,targetstart,targstartdate,scheduledfinish',
+          'wonum,description,status,' +
+          'assetnum,asset.description,' +
+          'location,locationdescription,' +
+          'priority,siteid,workorderid,ishistory,' +
+          'scheduledstart,targetstart,targstartdate,scheduledfinish',
         'oslc.pageSize': 100,
       },
       timeout: 30000,
+      validateStatus: () => true,
     });
+
+    if (res.status >= 400) {
+      throw new Error(`HTTP ${res.status}`);
+    }
 
     const items: MaximoWorkOrderItem[] = res.data?.member ?? [];
     console.log(`[getWorkOrders] ${items.length} WO récupérés`);
@@ -96,7 +98,6 @@ export async function getWorkOrders(username: string, password: string): Promise
         dynamicJobPlanApplied: false,
 
         site: item.siteid ?? '',
-
         siteid: item.siteid ?? undefined,
         workorderid: item.workorderid ?? undefined,
         ishistory: item.ishistory ?? undefined,
@@ -122,11 +123,12 @@ export async function getWorkOrderDetails(
   password: string
 ): Promise<Partial<WorkOrder> | null> {
   try {
-    const token = makeMaxAuth(username, password);
+    const token = makeToken(username, password);
 
     const res = await axios.get<MaximoResponse>(BASE_URL, {
       headers: {
         MAXAUTH: token,
+        Authorization: `Basic ${token}`,
         Accept: 'application/json',
       },
       params: {
@@ -136,7 +138,10 @@ export async function getWorkOrderDetails(
           'wonum,description,status,siteid,location,locationdescription,assetnum,worktype,glaccount,scheduledstart,targetstart,targstartdate,actualstart,actualfinish,parent,failclass,problemcode',
       },
       timeout: 30000,
+      validateStatus: () => true,
     });
+
+    if (res.status >= 400) return null;
 
     const item = res.data?.member?.[0] as MaximoWorkOrderDetails | undefined;
 

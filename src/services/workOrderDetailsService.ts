@@ -1,12 +1,13 @@
+// src/services/workOrderDetailsService.ts
 import axios from 'axios';
-import { Buffer } from 'buffer';
 import type { WorkOrder } from '../viewmodels/WorkOrdersViewModel';
 
-const BASE_URL = 'http://demo2.smartech-tn.com/maximo/oslc/os/mxwo';
-const API_ORIGIN = new URL(BASE_URL).origin;
+import { MAXIMO } from '../config/maximoUrls';
+import { makeToken } from './maximoClient';
 
-const makeMaxAuth = (u: string, p: string) =>
-  Buffer.from(`${u}:${p}`).toString('base64');
+import { rewriteDoclinkUrl, metaToDoclinkUrl, doclinkToMetaUrl } from './doclinks';
+
+const BASE_URL = `${MAXIMO.OSLC_OS}/mxwo`;
 
 export const parseLabHrs = (val: string | number | undefined): number => {
   if (!val) return 0;
@@ -24,83 +25,6 @@ function filenameFromUrl(u?: string): string {
   const clean = u.split('?')[0].split('#')[0].replace(/\/+$/, '');
   const last = clean.split('/').pop() || '';
   return last ? decodeURIComponent(last) : '';
-}
-
-/**
- * ✅ Corrige les typos d'endpoint qu'on voit parfois dans les réponses
- * /os/mxwwo/ , /os/mmxwo/ => /os/mxwo/
- */
-function fixMxwoTypos(u: string): string {
-  const s = safeTrim(u);
-  if (!s) return '';
-  return s
-    .replace(/\/os\/mmxwo\//i, '/os/mxwo/')
-    .replace(/\/os\/mxwwo\//i, '/os/mxwo/');
-}
-
-/**
- * Réécrit une URL vers le host API_ORIGIN, garde le path.
- * + applique le fix des typos /os/mmxwo/ etc.
- */
-export function rewriteDoclinkUrl(inputUrl?: string): string {
-  const raw = safeTrim(inputUrl);
-  if (!raw) return '';
-
-  if (raw.startsWith('http://childkey#') || raw.startsWith('childkey#')) return '';
-
-  // /maximo/... => prefix origin
-  if (raw.startsWith('/')) return fixMxwoTypos(`${API_ORIGIN}${raw}`);
-
-  // http(s)://ANYHOST/... => force API_ORIGIN but keep path
-  const m = raw.match(/^https?:\/\/[^/]+(\/.*)$/i);
-  if (m?.[1]) return fixMxwoTypos(`${API_ORIGIN}${m[1]}`);
-
-  return fixMxwoTypos(raw);
-}
-
-/**
- * ✅ meta -> binaire (robuste)
- * - .../doclinks/meta/{id}       => .../doclinks/{id}
- * - .../doclinks/{id}/meta       => .../doclinks/{id}
- * - fonctionne même si querystring existe
- */
-export function metaToDoclinkUrl(url?: string): string {
-  const u = safeTrim(url);
-  if (!u) return '';
-
-  // .../doclinks/meta/{id} -> .../doclinks/{id}
-  const m1 = u.match(/\/doclinks\/meta\/(\d+)(?=\/|$|\?)/i);
-  if (m1) return u.replace(/\/doclinks\/meta\/\d+/i, `/doclinks/${m1[1]}`);
-
-  // .../doclinks/{id}/meta -> .../doclinks/{id}
-  const m2 = u.match(/\/doclinks\/(\d+)\/meta(?=\/|$|\?)/i);
-  if (m2) return u.replace(/\/doclinks\/\d+\/meta/i, `/doclinks/${m2[1]}`);
-
-  return u;
-}
-
-/**
- * ✅ binaire -> meta (robuste)
- * - .../doclinks/{id}     => .../doclinks/meta/{id}
- * - si déjà meta, ne change rien
- * - conserve querystring
- */
-export function doclinkToMetaUrl(url?: string): string {
-  const u = safeTrim(url);
-  if (!u) return '';
-
-  // split query to preserve it
-  const [path, query = ''] = u.split('?');
-  const cleanPath = path.replace(/\/+$/, '');
-
-  // déjà meta
-  if (/\/doclinks\/meta\/\d+$/i.test(cleanPath)) {
-    return query ? `${cleanPath}?${query}` : cleanPath;
-  }
-
-  // .../doclinks/{id} => .../doclinks/meta/{id}
-  const converted = cleanPath.replace(/\/doclinks\/(\d+)$/i, '/doclinks/meta/$1');
-  return query ? `${converted}?${query}` : converted;
 }
 
 function pickDocInfo(d: any): any | null {
@@ -128,7 +52,6 @@ function extractDoclinkIdFromHref(href?: string): string {
   const clean = h.split('?')[0].split('#')[0].replace(/\/+$/, '');
   const last = clean.split('/').pop() || '';
 
-  // ✅ doclinkId doit être numérique (sinon on évite des ids invalides)
   return /^\d+$/.test(last) ? last : '';
 }
 
@@ -136,13 +59,7 @@ export function normalizeDoclinks(raw: any): NormalizedDocLink[] {
   if (!raw) return [];
 
   const member = Array.isArray(raw?.member) ? raw.member : null;
-  const list = member
-    ? member
-    : Array.isArray(raw)
-    ? raw
-    : typeof raw === 'object'
-    ? [raw]
-    : [];
+  const list = member ? member : Array.isArray(raw) ? raw : typeof raw === 'object' ? [raw] : [];
 
   return list.map((d: any) => {
     const di = pickDocInfo(d);
@@ -150,7 +67,6 @@ export function normalizeDoclinks(raw: any): NormalizedDocLink[] {
     const describedByHref = rewriteDoclinkUrl(safeTrim(d?.describedBy?.href));
     const describedByDesc = safeTrim(d?.describedBy?.description);
 
-    // ✅ href normalisé + meta->binaire + fix typos
     const href = rewriteDoclinkUrl(metaToDoclinkUrl(safeTrim(d?.href) || safeTrim(di?.href)));
     const doclinkId = extractDoclinkIdFromHref(href);
 
@@ -160,7 +76,6 @@ export function normalizeDoclinks(raw: any): NormalizedDocLink[] {
       safeTrim(di?.href) ||
       safeTrim(d?.href);
 
-    // ✅ urlname normalisé + fix typos (sans forcer meta->binaire car parfois urlname n'est pas doclinks)
     const urlname = rewriteDoclinkUrl(rawUrl);
 
     const title =
@@ -217,7 +132,7 @@ export async function getDoclinkDetailsByHref(
   username: string,
   password: string
 ): Promise<Partial<NormalizedDocLink> | null> {
-  const token = makeMaxAuth(username, password);
+  const token = makeToken(username, password);
 
   const fixed = rewriteDoclinkUrl(metaToDoclinkUrl(anyHref));
 
@@ -235,6 +150,7 @@ export async function getDoclinkDetailsByHref(
     const res = await axios.get<any>(fixed, {
       headers: {
         MAXAUTH: token,
+        Authorization: `Basic ${token}`,
         Accept: 'application/json',
         properties: '*',
       },
@@ -242,9 +158,13 @@ export async function getDoclinkDetailsByHref(
         lean: 1,
         'oslc.select': '*,docinfo{*},describedBy{*}',
         'oslc.expand': 'docinfo,describedBy',
+        _ts: Date.now(), // ✅ cache-buster safe here too
       },
       timeout: 30000,
+      validateStatus: () => true,
     });
+
+    if (res.status >= 400) return null;
 
     const obj: any = res.data?.member?.[0] ?? res.data;
     if (!obj) return null;
@@ -295,12 +215,6 @@ export async function getDoclinkDetailsByHref(
 
     const display = title || filenameFromUrl(urlname) || filenameFromUrl(href);
 
-    console.log('✅ [getDoclinkDetailsByHref] display:', display);
-    console.log('✅ [getDoclinkDetailsByHref] desc:', desc);
-    console.log('✅ [getDoclinkDetailsByHref] createdate:', createdate);
-    console.log('✅ [getDoclinkDetailsByHref] urlname:', urlname);
-    console.log('==============================');
-
     return {
       document: display || undefined,
       description: desc || undefined,
@@ -310,9 +224,7 @@ export async function getDoclinkDetailsByHref(
     };
   } catch (err: any) {
     console.log('❌ [getDoclinkDetailsByHref] error status:', err?.response?.status);
-    console.log('❌ [getDoclinkDetailsByHref] error data:', JSON.stringify(err?.response?.data)?.slice(0, 2000));
     console.log('❌ [getDoclinkDetailsByHref] message:', err?.message || err);
-    console.log('==============================');
     return null;
   }
 }
@@ -322,24 +234,17 @@ export async function getDoclinkMetaByHref(
   username: string,
   password: string
 ): Promise<Partial<NormalizedDocLink> | null> {
-  const token = makeMaxAuth(username, password);
+  const token = makeToken(username, password);
 
   const metaUrl = rewriteDoclinkUrl(doclinkToMetaUrl(anyHref));
 
-  console.log('==============================');
-  console.log('🧾 [getDoclinkMetaByHref] input:', anyHref);
-  console.log('🧾 [getDoclinkMetaByHref] metaUrl:', metaUrl);
-
-  if (!metaUrl) {
-    console.log('❌ [getDoclinkMetaByHref] empty meta url');
-    console.log('==============================');
-    return null;
-  }
+  if (!metaUrl) return null;
 
   try {
     const res = await axios.get<any>(metaUrl, {
       headers: {
         MAXAUTH: token,
+        Authorization: `Basic ${token}`,
         Accept: 'application/json',
         properties: '*',
       },
@@ -347,9 +252,13 @@ export async function getDoclinkMetaByHref(
         lean: 1,
         'oslc.select': '*,docinfo{*},describedBy{*}',
         'oslc.expand': 'docinfo,describedBy',
+        _ts: Date.now(), // ✅ cache-buster
       },
       timeout: 30000,
+      validateStatus: () => true,
     });
+
+    if (res.status >= 400) return null;
 
     const obj: any = res.data?.member?.[0] ?? res.data;
     if (!obj) return null;
@@ -397,18 +306,11 @@ export async function getDoclinkMetaByHref(
 
     const urlname = rewriteDoclinkUrl(rawUrl);
 
-    // ✅ on renvoie un href binaire même si on a consulté meta
     const href = rewriteDoclinkUrl(
       metaToDoclinkUrl(safeTrim(obj?.href) || safeTrim(di?.href) || metaUrl)
     );
 
     const display = title || filenameFromUrl(urlname) || filenameFromUrl(href);
-
-    console.log('✅ [getDoclinkMetaByHref] display:', display);
-    console.log('✅ [getDoclinkMetaByHref] desc:', desc);
-    console.log('✅ [getDoclinkMetaByHref] createdate:', createdate);
-    console.log('✅ [getDoclinkMetaByHref] urlname:', urlname);
-    console.log('==============================');
 
     return {
       document: display || undefined,
@@ -418,31 +320,35 @@ export async function getDoclinkMetaByHref(
       href: href || undefined,
     };
   } catch (err: any) {
-    console.log('❌ [getDoclinkMetaByHref] error status:', err?.response?.status);
-    console.log('❌ [getDoclinkMetaByHref] error data:', JSON.stringify(err?.response?.data)?.slice(0, 2000));
-    console.log('❌ [getDoclinkMetaByHref] message:', err?.message || err);
-    console.log('==============================');
     return null;
   }
 }
 
 interface MaximoWorkOrderItem {
+  href?: string;
+
   wonum?: string;
   description?: string;
   status?: string;
+
   assetnum?: string;
   asset?: { description?: string } | string;
+
   location?: string | { location?: string };
   locationdescription?: string;
+
   priority?: number | string;
   siteid?: string;
   workorderid?: number;
   ishistory?: boolean;
+
   scheduledstart?: string;
   scheduledfinish?: string;
+
   woactivity?: any | any[];
   wplabor?: any | any[];
   wpmaterial?: any | any[];
+
   doclinks?: any;
 }
 
@@ -455,7 +361,7 @@ export async function getWorkOrderDetails(
   username: string,
   password: string
 ): Promise<WorkOrder | null> {
-  const token = makeMaxAuth(username, password);
+  const token = makeToken(username, password);
 
   console.log('==============================');
   console.log('📥 [getWorkOrderDetails] wonum:', wonum);
@@ -466,48 +372,62 @@ export async function getWorkOrderDetails(
     const res = await axios.get<MaximoResponse>(BASE_URL, {
       headers: {
         MAXAUTH: token,
+        Authorization: `Basic ${token}`,
         Accept: 'application/json',
         properties: '*',
+
+        // ✅ force no cache
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
       },
       params: {
         lean: 1,
         'oslc.where': `wonum="${wonum}"`,
         'oslc.pageSize': 1,
+
+        // ✅ IMPORTANT: include href on WO + on woactivity
         'oslc.select':
-          'wonum,description,status,assetnum,asset.description,location,locationdescription,priority,siteid,workorderid,ishistory,' +
+          'href,wonum,description,status,assetnum,asset.description,location,locationdescription,priority,siteid,workorderid,ishistory,' +
           'scheduledstart,scheduledfinish,' +
-          'woactivity{taskid,description,status,labhrs},' +
+          'woactivity{href,taskid,description,status,labhrs},' +
           'wplabor{taskid,laborcode,description,labhrs,regularhrs,laborhrs},' +
           'wpmaterial{taskid,itemnum,description,itemqty},' +
           'doclinks{href,urlname,document,description,createdate,creationdate,changedate,' +
           'describedBy{description,href},' +
           'docinfo{document,description,createdate,creationdate,changedate,urlname,doctitle,title,href}}',
+
         'oslc.expand': 'doclinks{docinfo},doclinks{describedBy}',
+
+        // ✅ cache buster (most important)
+        _ts: Date.now(),
       },
       timeout: 30000,
+      validateStatus: () => true,
     });
 
+    if (res.status >= 400) return null;
     if (!res.data.member?.length) return null;
+
     const item = res.data.member[0];
 
     const loc =
-      typeof item.location === 'string'
-        ? item.location
-        : (item.location as any)?.location ?? '';
+      typeof item.location === 'string' ? item.location : (item.location as any)?.location ?? '';
 
     const locDesc = item.locationdescription ?? loc ?? '';
 
-    // ✅ normalize doclinks
     const docLinksArr = normalizeDoclinks(item.doclinks);
 
-    console.log('==============================');
-    console.log('📥 [getWorkOrderDetails] docLinksArr length:', docLinksArr.length);
-    console.log('📥 [getWorkOrderDetails] docLinksArr sample:', docLinksArr[0]);
-    console.log('==============================');
+    const activitiesRaw = Array.isArray(item.woactivity)
+      ? item.woactivity
+      : item.woactivity
+      ? [item.woactivity]
+      : [];
 
     const wo: WorkOrder = {
       wonum: item.wonum ?? wonum,
       barcode: item.wonum ?? wonum,
+
+      href: safeTrim((item as any)?.href) || undefined,
 
       description: item.description ?? '',
       details: '',
@@ -536,26 +456,33 @@ export async function getWorkOrderDetails(
       isUrgent: Number(item.priority) === 1,
       cout: 0,
 
-      activities: (Array.isArray(item.woactivity) ? item.woactivity : item.woactivity ? [item.woactivity] : []).map(a => ({
-        taskid: String((a as any)?.taskid ?? ''),
-        description: (a as any)?.description ?? '',
-        status: (a as any)?.status ?? '',
-        labhrs: parseLabHrs((a as any)?.labhrs),
-      })),
+      activities: activitiesRaw.map((a: any) => {
+        const status = String(a?.status ?? '');
+        return {
+          href: safeTrim(a?.href) || undefined,
+          taskid: String(a?.taskid ?? ''),
+          description: a?.description ?? '',
+          labhrs: parseLabHrs(a?.labhrs),
+          status,
+          statut: status,
+        };
+      }),
 
-      labor: (Array.isArray(item.wplabor) ? item.wplabor : item.wplabor ? [item.wplabor] : []).map(l => ({
+      labor: (Array.isArray(item.wplabor) ? item.wplabor : item.wplabor ? [item.wplabor] : []).map((l) => ({
         taskid: String((l as any)?.taskid ?? ''),
         laborcode: (l as any)?.laborcode ?? '',
         description: (l as any)?.description ?? '',
         labhrs: parseLabHrs((l as any)?.labhrs ?? (l as any)?.regularhrs ?? (l as any)?.laborhrs),
       })),
 
-      materials: (Array.isArray(item.wpmaterial) ? item.wpmaterial : item.wpmaterial ? [item.wpmaterial] : []).map(m => ({
-        taskid: String((m as any)?.taskid ?? ''),
-        itemnum: (m as any)?.itemnum ?? '',
-        description: (m as any)?.description ?? '',
-        quantity: Number((m as any)?.itemqty ?? 0),
-      })),
+      materials: (Array.isArray(item.wpmaterial) ? item.wpmaterial : item.wpmaterial ? [item.wpmaterial] : []).map(
+        (m) => ({
+          taskid: String((m as any)?.taskid ?? ''),
+          itemnum: (m as any)?.itemnum ?? '',
+          description: (m as any)?.description ?? '',
+          quantity: Number((m as any)?.itemqty ?? 0),
+        })
+      ),
 
       docLinks: docLinksArr as any,
     };

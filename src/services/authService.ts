@@ -1,12 +1,10 @@
+// src/services/authService.ts (or wherever this file is)
+
 import axios from 'axios';
+import { MAXIMO } from '../config/maximoUrls';
+import { makeToken } from './maximoClient';
 
-const VALIDATE_URL = 'http://demo2.smartech-tn.com/maximo/oslc/os/mxwo?lean=1&oslc.select=wonum&oslc.pageSize=1';
-
-function makeMaxAuth(username: string, password: string): string {
-  return btoa(`${username.trim()}:${password.trim()}`);
-}
-
-
+const VALIDATE_URL = `${MAXIMO.OSLC_OS}/mxwo?lean=1&oslc.select=wonum&oslc.pageSize=1`;
 
 function errorMessage(err: any): string {
   const status = err?.response?.status;
@@ -16,14 +14,18 @@ function errorMessage(err: any): string {
   return `Erreur: ${err?.message || 'Inconnue'}`;
 }
 
-export async function login(username: string, password: string): Promise<{ ok: boolean; token: string }> {
-  const token = makeMaxAuth(username, password);
+export async function login(
+  username: string,
+  password: string
+): Promise<{ ok: boolean; token: string }> {
+  const token = makeToken(username.trim(), password.trim());
   const headers = {
     MAXAUTH: token,
     Accept: 'application/json',
   };
 
-  console.log('DEBUG: MAXAUTH token =', token); 
+  console.log('DEBUG: MAXAUTH token =', token);
+
   try {
     const res = await axios.get(VALIDATE_URL, { headers, timeout: 15000 });
     if (res.status === 200) {

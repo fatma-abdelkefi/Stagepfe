@@ -1,5 +1,7 @@
 import axios from 'axios';
-import { Buffer } from 'buffer';
+
+import { MAXIMO } from '../config/maximoUrls';
+import { makeToken } from './maximoClient';
 
 export interface DoclinkInput {
   document: string;
@@ -16,9 +18,10 @@ export async function addDoclink(params: {
 }) {
   const { ownerid, siteid, username, password, doclink } = params;
 
-  const token = Buffer.from(`${username}:${password}`).toString('base64');
+  const token = makeToken(username, password);
 
-  const url = `http://demo2.smartech-tn.com/maximo/oslc/os/sm15?lean=1`;
+  // ✅ centralized base
+  const url = `${MAXIMO.OSLC_OS}/sm15?lean=1`;
 
   const body = {
     document: doclink.document,
@@ -38,7 +41,12 @@ export async function addDoclink(params: {
   const headers = {
     Accept: 'application/json',
     'Content-Type': 'application/json',
+
+    // ✅ keep both (some envs are picky)
+    MAXAUTH: token,
+    Authorization: `Basic ${token}`,
     maxauth: `Basic ${token}`,
+
     properties: '*',
   };
 

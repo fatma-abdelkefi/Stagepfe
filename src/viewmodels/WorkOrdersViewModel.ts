@@ -3,10 +3,19 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getWorkOrderDetails } from '../services/workOrderDetailsService';
 
 // ─── Types ───────────────────────────────────────────
-export type ActivityItem = { taskid: string; description?: string; status?: string; labhrs?: number };
+export type ActivityItem = {
+  taskid: string;
+  description?: string;
+  status?: string;
+  labhrs?: number;
+
+  href?: string; // ✅ KEEP
+
+  statut?: string;
+};
 export type LaborItem = { taskid: string; laborcode?: string; description?: string; labhrs?: number };
 export type MaterialItem = { taskid: string; itemnum?: string; description?: string; quantity?: number };
-export type DocLinkItem = { document?: string; description?: string; createdate?: string; urlname?: string;docinfo?: any; };
+export type DocLinkItem = { document?: string; description?: string; createdate?: string; urlname?: string; docinfo?: any };
 
 export type WPLaborItem = {
   taskid: string;
@@ -25,7 +34,9 @@ export type WorkOrder = {
   assetDescription?: string;
   status: string;
   locationDescription: string;
-  // dates
+
+  href?: string; // ✅ KEEP for WO patch
+
   scheduledStart: string | null;
   scheduledFinish?: string | null;
 
@@ -33,13 +44,11 @@ export type WorkOrder = {
   isDynamic: boolean;
   dynamicJobPlanApplied: boolean;
 
-  // ✅ You used "site" historically in your UI
   site: string;
 
-  // ✅ Add Maximo keys needed by AddMaterial / errors
-  siteid?: string;        // Maximo field
-  workorderid?: number;   // Maximo field
-  ishistory?: boolean;    // Maximo field
+  siteid?: string;
+  workorderid?: number;
+  ishistory?: boolean;
 
   completed: boolean;
   isUrgent: boolean;
@@ -66,20 +75,94 @@ export type WorkOrder = {
   materialStatusLastUpdated?: string;
 };
 
-// ─── Helper pour convertir labhrs ─────────────────────
+// ─── Helpers ─────────────────────────────────────────
+function safeStr(v: any): string {
+  return typeof v === 'string' ? v.trim() : '';
+}
+
 export const parseLabHrs = (val: string | number | undefined): number => {
   if (!val) return 0;
   if (typeof val === 'number') return val;
   const [h, m] = val.split(':').map(Number);
-  return h + (m ? m / 60 : 0);
+  return (h || 0) + ((m || 0) / 60);
 };
-const isSameDay = (d1: Date, d2: Date) => {
-  return (
-    d1.getFullYear() === d2.getFullYear() &&
-    d1.getMonth() === d2.getMonth() &&
-    d1.getDate() === d2.getDate()
-  );
-};
+
+const isSameDay = (d1: Date, d2: Date) =>
+  d1.getFullYear() === d2.getFullYear() &&
+  d1.getMonth() === d2.getMonth() &&
+  d1.getDate() === d2.getDate();
+
+/** ✅ NEW: safe activity href getter */
+function getActivityHref(a: any): string {
+  if (!a) return '';
+  if (typeof a.href === 'string') return a.href.trim();
+  if (typeof a?.href?.href === 'string') return a.href.href.trim();
+  return '';
+}
+
+/**
+ * ✅ IMPORTANT:
+ * Convert ANY details object into a safe WorkOrder (wonum never undefined)
+ * ✅ AND NEVER DROP href
+ */
+function ensureWorkOrder(details: any, wonumFallback: string): WorkOrder {
+  const wonum = safeStr(details?.wonum) || wonumFallback;
+
+  return {
+    wonum,
+    barcode: safeStr(details?.barcode) || wonum,
+
+    href: safeStr(details?.href) || undefined, // ✅ keep WO href
+
+    description: safeStr(details?.description) || '',
+    details: safeStr(details?.details) || '',
+
+    location: safeStr(details?.location) || '',
+    locationDescription: safeStr(details?.locationDescription) || safeStr(details?.location) || '',
+
+    asset: safeStr(details?.asset) || safeStr(details?.assetnum) || '',
+    assetDescription: safeStr(details?.assetDescription) || safeStr(details?.asset?.description) || '',
+
+    status: safeStr(details?.status) || '',
+
+    scheduledStart: details?.scheduledStart ?? details?.scheduledstart ?? null,
+    scheduledFinish: details?.scheduledFinish ?? details?.scheduledfinish ?? null,
+
+    priority: Number(details?.priority ?? 0),
+    isDynamic: Boolean(details?.isDynamic ?? false),
+    dynamicJobPlanApplied: Boolean(details?.dynamicJobPlanApplied ?? false),
+
+    site: safeStr(details?.site) || safeStr(details?.siteid) || '',
+    siteid: details?.siteid ?? undefined,
+    workorderid: details?.workorderid ?? undefined,
+    ishistory: details?.ishistory ?? undefined,
+
+    completed: Boolean(details?.completed ?? false),
+    isUrgent: Boolean(details?.isUrgent ?? Number(details?.priority) === 1),
+    cout: Number(details?.cout ?? 0),
+
+    activities: Array.isArray(details?.activities) ? details.activities : [],
+    labor: Array.isArray(details?.labor) ? details.labor : [],
+    wplabor: Array.isArray(details?.wplabor) ? details.wplabor : [],
+    materials: Array.isArray(details?.materials) ? details.materials : [],
+    docLinks: Array.isArray(details?.docLinks) ? details.docLinks : [],
+
+    wplabor_collectionref: details?.wplabor_collectionref,
+
+    actualStart: details?.actualStart ?? null,
+    actualFinish: details?.actualFinish ?? null,
+    parentWo: details?.parentWo,
+    failureClass: details?.failureClass,
+    problemCode: details?.problemCode,
+    workType: details?.workType,
+    glAccount: details?.glAccount,
+
+    materialStatusStoreroom: details?.materialStatusStoreroom,
+    materialStatusDirect: details?.materialStatusDirect,
+    materialStatusPackage: details?.materialStatusPackage,
+    materialStatusLastUpdated: details?.materialStatusLastUpdated,
+  };
+}
 
 // ─── Hook useWorkOrders ─────────────────────────────
 export function useWorkOrders() {
@@ -118,81 +201,99 @@ export function useWorkOrders() {
         item.site.toLowerCase().includes(q);
 
       if (!matchesSearch) return false;
-        if (selectedDate) {
-          if (!item.scheduledStart) return false;
 
-          const woDate = new Date(item.scheduledStart);
-          if (
-            woDate.getFullYear() !== selectedDate.getFullYear() ||
-            woDate.getMonth() !== selectedDate.getMonth() ||
-            woDate.getDate() !== selectedDate.getDate()
-          ) {
-            return false;
-          }
-        }
+      if (selectedDate) {
+        if (!item.scheduledStart) return false;
+        const woDate = new Date(item.scheduledStart);
+        if (!isSameDay(woDate, selectedDate)) return false;
+      }
+
       switch (activeFilter) {
-        case 'Tous': return true;
+        case 'Tous':
+          return true;
         case "Aujourd'hui":
-          return item.scheduledStart ? new Date(item.scheduledStart).toDateString() === new Date().toDateString() : false;
+          return item.scheduledStart
+            ? new Date(item.scheduledStart).toDateString() === new Date().toDateString()
+            : false;
         case 'À venir':
           return item.scheduledStart ? new Date(item.scheduledStart) > new Date() : false;
-        case 'Urgent': return item.isUrgent;
-        case 'Terminés': return item.completed;
-        default: return true;
+        case 'Urgent':
+          return item.isUrgent;
+        case 'Terminés':
+          return item.completed;
+        default:
+          return true;
       }
     });
   }, [data, search, activeFilter, barcodeFilter, selectedDate]);
 
   const todayCount = useMemo(() => {
     const todayStr = new Date().toDateString();
-    return data.filter(item => item.scheduledStart && new Date(item.scheduledStart).toDateString() === todayStr && !item.completed).length;
+    return data.filter(
+      item =>
+        item.scheduledStart &&
+        new Date(item.scheduledStart).toDateString() === todayStr &&
+        !item.completed
+    ).length;
   }, [data]);
 
-  
   const fetchWorkOrderDetails = async (wonum: string) => {
     try {
       const username = await AsyncStorage.getItem('@username');
       const password = await AsyncStorage.getItem('@password');
       if (!username || !password) throw new Error('Identifiants non trouvés');
 
-      const details = await getWorkOrderDetails(wonum, username, password);
-      if (!details || typeof details !== 'object') return;
+      const detailsRaw = await getWorkOrderDetails(wonum, username, password);
+      if (!detailsRaw || typeof detailsRaw !== 'object') return;
+
+      const base = ensureWorkOrder(detailsRaw as any, wonum);
 
       const woDetails: WorkOrder = {
-        ...details,
-        activities: (details.activities ?? []).map(a => ({
-          taskid: String((a as any).taskid ?? ''),
-          description: (a as any).description ?? '',
-          status: (a as any).status ?? '',
-          labhrs: (a as any).labhrs ?? 0,
+        ...base,
+
+        /** ✅ FIX: keep href in activities */
+        activities: (base.activities ?? []).map((a: any) => ({
+          href: getActivityHref(a) || undefined,
+          taskid: String(a?.taskid ?? ''),
+          description: a?.description ?? '',
+          status: a?.status ?? a?.statut ?? '',
+          statut: a?.statut ?? a?.status ?? '',
+          labhrs: a?.labhrs ?? 0,
         })),
-        wplabor: (details.wplabor ?? []).map(l => ({
-          taskid: String((l as any).taskid ?? ''),
-          laborcode: (l as any).laborcode ?? '',
-          description: (l as any).description ?? '',
-          labhrs: parseLabHrs((l as any).labhrs),
+
+        wplabor: (base.wplabor ?? []).map((l: any) => ({
+          taskid: String(l?.taskid ?? ''),
+          laborcode: l?.laborcode ?? '',
+          description: l?.description ?? '',
+          labhrs: parseLabHrs(l?.labhrs),
         })),
-        labor: (details.labor ?? []).map(l => ({
-          taskid: String((l as any).taskid ?? ''),
-          laborcode: (l as any).laborcode ?? '',
-          description: (l as any).description ?? '',
-          labhrs: parseLabHrs((l as any).labhrs),
+
+        labor: (base.labor ?? []).map((l: any) => ({
+          taskid: String(l?.taskid ?? ''),
+          laborcode: l?.laborcode ?? '',
+          description: l?.description ?? '',
+          labhrs: parseLabHrs(l?.labhrs),
         })),
-        materials: (details.materials ?? []).map(m => ({
-          taskid: String((m as any).taskid ?? ''),
-          itemnum: (m as any).itemnum ?? '',
-          description: (m as any).description ?? '',
-          quantity: Number((m as any).quantity ?? 0),
+
+        materials: (base.materials ?? []).map((m: any) => ({
+          taskid: String(m?.taskid ?? ''),
+          itemnum: m?.itemnum ?? '',
+          description: m?.description ?? '',
+          quantity: Number(m?.quantity ?? 0),
         })),
-        docLinks: (details.docLinks ?? []).map(d => ({
-          document: (d as any).document ?? '',
-          description: (d as any).description ?? '',
-          createdate: (d as any).createdate ?? '',
-          urlname: (d as any).urlname ?? '',
+
+        docLinks: (base.docLinks ?? []).map((d: any) => ({
+          document: d?.document ?? '',
+          description: d?.description ?? '',
+          createdate: d?.createdate ?? '',
+          urlname: d?.urlname ?? '',
+          docinfo: d?.docinfo,
         })),
       };
 
-      setData(prev => prev.map(item => (item.wonum === wonum ? { ...item, ...woDetails } : item)));
+      setData(prev =>
+        prev.map(item => (item.wonum === wonum ? { ...item, ...woDetails } : item))
+      );
     } catch (err: any) {
       console.error('Erreur fetch WO:', err.message);
     }
@@ -214,6 +315,5 @@ export function useWorkOrders() {
     formatDate,
     todayCount,
     fetchWorkOrderDetails,
-    
   };
 }
