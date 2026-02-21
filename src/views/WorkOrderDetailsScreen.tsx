@@ -1,5 +1,5 @@
 // src/screens/WorkOrderDetailsScreen.tsx
-import React, { useEffect, useCallback, useState } from 'react';
+import React, { useEffect, useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,8 @@ import {
   ActivityIndicator,
   TouchableOpacity,
   Alert,
-  Dimensions,
+  useWindowDimensions,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RouteProp, useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -20,37 +21,48 @@ import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/AuthContext';
 import StatusChangeModal from '../components/StatusChangeModal';
 
-const { width } = Dimensions.get('window');
-const CARD_WIDTH = (width - 60) / 2;
-
 type Props = { route: RouteProp<RootStackParamList, 'WorkOrderDetails'> };
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'WorkOrderDetails'>;
 
 const CATEGORIES = [
-  { key: 'Activités', icon: 'list', gradient: ['#3b82f6', '#2563eb'] },
-  { key: "Main d'œuvre planifiée", icon: 'users', gradient: ['#60a5fa', '#3b82f6'] },
-  { key: 'Matériel planifié', icon: 'package', gradient: ['#93c5fd', '#60a5fa'] },
-  { key: 'Documents', icon: 'file-text', gradient: ['#1e40af', '#1e3a8a'] },
+  { key: 'Activités', icon: 'list', gradient: ['#124aa5', '#0b4bd4'] },
+  { key: 'Documents', icon: 'file-text', gradient: ['#124aa5', '#0b4bd4'] },
+
+  { key: "Main d'œuvre planifiée", icon: 'users', gradient: ['#93c5fd', '#3b82f6'] },
+  { key: "Main d'œuvre réelle", icon: 'user-check', gradient: ['#005ed1', '#0ea5e9'] },
+
+  { key: 'Matériel planifié', icon: 'package', gradient: ['#93c5fd', '#3b82f6'] },
+  { key: 'Matériel réel', icon: 'clipboard', gradient: ['#005ed1', '#0ea5e9'] },
 ];
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
 
 export default function WorkOrderDetailsScreen({ route }: Props) {
   const woParam = (route as any)?.params?.workOrder;
   const navigation = useNavigation<NavProp>();
+  const { width } = useWindowDimensions();
 
-  // ✅ All hooks first
+  const layout = useMemo(() => {
+    const sidePadding = clamp(Math.round(width * 0.05), 14, 24);
+    const gap = clamp(Math.round(width * 0.04), 12, 18);
+
+    const columns = 2;
+    const contentWidth = width - sidePadding * 2;
+    const cardWidth = (contentWidth - gap * (columns - 1)) / columns;
+    const cardHeight = clamp(cardWidth, 140, 220);
+
+    return { sidePadding, gap, columns, cardWidth, cardHeight };
+  }, [width]);
+
   const { username, password, authLoading } = useAuth();
-
-  const { workOrder: details, loading, error, refresh } = useWorkOrderDetails(
-    woParam?.wonum ?? ''
-  );
+  const { workOrder: details, loading, error, refresh } = useWorkOrderDetails(woParam?.wonum ?? '');
 
   const [statusModalVisible, setStatusModalVisible] = useState(false);
-
-  // ✅ keep code + label in state
   const [currentStatus, setCurrentStatus] = useState(woParam?.status ?? '');
   const [currentStatusLabel, setCurrentStatusLabel] = useState(woParam?.status ?? '');
 
-  // ✅ sync when backend details change
   useEffect(() => {
     if (details?.status) {
       setCurrentStatus(details.status);
@@ -58,7 +70,6 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
     }
   }, [details?.status]);
 
-  // ✅ session check
   useEffect(() => {
     if (authLoading) return;
     if (!username || !password) {
@@ -67,25 +78,19 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
     }
   }, [authLoading, username, password, navigation]);
 
-  // ✅ refresh on focus (coming back to this screen)
   useFocusEffect(
     useCallback(() => {
-      if (!authLoading && woParam?.wonum) {
-        refresh();
-      }
+      if (!authLoading && woParam?.wonum) refresh();
       return () => {};
     }, [authLoading, refresh, woParam?.wonum])
   );
 
-  // ✅ Early returns AFTER hooks
   if (!woParam?.wonum) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.errorContainer}>
           <FeatherIcon name="alert-circle" size={64} color="#ef4444" />
-          <Text style={styles.errorMessage}>
-            Paramètres manquants (workOrder / wonum).
-          </Text>
+          <Text style={styles.errorMessage}>Paramètres manquants (workOrder / wonum).</Text>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.retryButton}>
             <LinearGradient
               colors={['#3b82f6', '#2563eb']}
@@ -106,9 +111,7 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#3b82f6" />
-        <Text style={styles.loadingText}>
-          {authLoading ? 'Vérification session...' : 'Chargement...'}
-        </Text>
+        <Text style={styles.loadingText}>{authLoading ? 'Vérification session...' : 'Chargement...'}</Text>
       </View>
     );
   }
@@ -139,12 +142,23 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
     switch (category) {
       case 'Activités':
         return details.activities?.length ?? 0;
+
       case "Main d'œuvre planifiée":
         return details.labor?.length ?? 0;
+
       case 'Matériel planifié':
         return details.materials?.length ?? 0;
+
+      // ✅ from sm_mxwodetails
+      case "Main d'œuvre réelle":
+        return (details as any).actualLabor?.length ?? 0;
+
+      case 'Matériel réel':
+        return (details as any).actualMaterials?.length ?? 0;
+
       case 'Documents':
         return (details as any).docLinks?.length ?? 0;
+
       default:
         return 0;
     }
@@ -156,7 +170,10 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
         colors={['#3b82f6', '#2563eb', '#1e40af']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={styles.header}
+        style={[
+          styles.header,
+          { paddingHorizontal: layout.sidePadding, paddingTop: Platform.OS === 'android' ? 10 : 12 },
+        ]}
       >
         <View style={styles.headerTop}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
@@ -190,7 +207,7 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
 
               <TouchableOpacity
                 onPress={() => {
-                  if (!details?.href) {
+                  if (!(details as any)?.href) {
                     Alert.alert('Erreur', 'href manquant (impossible de changer le statut)');
                     return;
                   }
@@ -200,9 +217,7 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
                 activeOpacity={0.8}
               >
                 <FeatherIcon name="refresh-cw" size={13} color="#2563eb" />
-                <Text style={styles.statusChangeBtnText}>
-                  {currentStatusLabel || currentStatus || '-'}
-                </Text>
+                <Text style={styles.statusChangeBtnText}>{currentStatusLabel || currentStatus || '-'}</Text>
                 <FeatherIcon name="chevron-down" size={13} color="#2563eb" />
               </TouchableOpacity>
             </View>
@@ -215,7 +230,9 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
               <FeatherIcon name="tool" size={16} color="#3b82f6" />
               <View style={{ flex: 1 }}>
                 <Text style={styles.infoLabel}>Actif</Text>
-                <Text style={styles.infoValue}>{details.asset || '-'}</Text>
+                <Text style={styles.infoValue} numberOfLines={1}>
+                  {(details as any).asset || '-'}
+                </Text>
               </View>
             </View>
 
@@ -223,7 +240,9 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
               <FeatherIcon name="map-pin" size={16} color="#3b82f6" />
               <View style={{ flex: 1 }}>
                 <Text style={styles.infoLabel}>Emplacement</Text>
-                <Text style={styles.infoValue}>{details.location || '-'}</Text>
+                <Text style={styles.infoValue} numberOfLines={1}>
+                  {(details as any).location || '-'}
+                </Text>
               </View>
             </View>
           </View>
@@ -233,7 +252,7 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
               <FeatherIcon name="calendar" size={16} color="#3b82f6" />
               <View style={{ flex: 1 }}>
                 <Text style={styles.infoLabel}>Début prévu</Text>
-                <Text style={styles.infoValue}>
+                <Text style={styles.infoValue} numberOfLines={1}>
                   {details.scheduledStart ? String(details.scheduledStart) : '-'}
                 </Text>
               </View>
@@ -243,7 +262,7 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
               <FeatherIcon name="check-square" size={16} color="#3b82f6" />
               <View style={{ flex: 1 }}>
                 <Text style={styles.infoLabel}>Fin prévue</Text>
-                <Text style={styles.infoValue}>
+                <Text style={styles.infoValue} numberOfLines={1}>
                   {(details as any).actualFinish ? String((details as any).actualFinish) : '-'}
                 </Text>
               </View>
@@ -252,27 +271,35 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
         </View>
       </LinearGradient>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={{ paddingHorizontal: layout.sidePadding, paddingTop: 18 }}
+        showsVerticalScrollIndicator={false}
+      >
         <Text style={styles.sectionTitle}>Catégories</Text>
 
-        <View style={styles.categoryGrid}>
+        <View style={[styles.categoryGrid, { columnGap: layout.gap, rowGap: layout.gap }]}>
           {CATEGORIES.map((category) => {
             const count = getCategoryCount(category.key);
 
             return (
               <TouchableOpacity
                 key={category.key}
-                style={styles.categoryCard}
+                style={[styles.categoryCard, { width: layout.cardWidth, height: layout.cardHeight }]}
                 activeOpacity={0.8}
                 onPress={() => {
                   if (category.key === 'Activités') {
                     navigation.navigate('DetailsActivities', { workOrder: details });
-                  } else if (category.key === "Main d'œuvre planifiée") {
-                    navigation.navigate('DetailsLabor', { workOrder: details });
-                  } else if (category.key === 'Matériel planifié') {
-                    navigation.navigate('DetailsMaterials', { workOrder: details });
                   } else if (category.key === 'Documents') {
                     navigation.navigate('DetailsDocuments', { workOrder: details });
+                  } else if (category.key === "Main d'œuvre planifiée") {
+                    navigation.navigate('DetailsLabor', { workOrder: details });
+                  } else if (category.key === "Main d'œuvre réelle") {
+                    navigation.navigate('DetailsActualLabor', { workOrder: details });
+                  } else if (category.key === 'Matériel planifié') {
+                    navigation.navigate('DetailsMaterials', { workOrder: details });
+                  } else if (category.key === 'Matériel réel') {
+                    navigation.navigate('DetailsActualMaterials', { workOrder: details });
                   }
                 }}
               >
@@ -286,7 +313,9 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
                     <View style={styles.categoryIconContainer}>
                       <FeatherIcon name={category.icon as any} size={32} color="#fff" />
                     </View>
-                    <Text style={styles.categoryName}>{category.key}</Text>
+                    <Text style={styles.categoryName} numberOfLines={2}>
+                      {category.key}
+                    </Text>
                   </View>
 
                   <View style={styles.categoryCount}>
@@ -304,7 +333,7 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
                             workorderid: details.workorderid,
                             siteid: details.siteid,
                             status: details.status,
-                            ishistory: details.ishistory,
+                            ishistory: (details as any).ishistory,
                           });
                         } else if (category.key === "Main d'œuvre planifiée") {
                           if (!details.workorderid || !details.siteid) {
@@ -312,6 +341,24 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
                             return;
                           }
                           navigation.navigate('AddLabor', {
+                            workorderid: details.workorderid,
+                            siteid: details.siteid,
+                          });
+                        } else if (category.key === 'Matériel réel') {
+                          if (!details.workorderid || !details.siteid) {
+                            Alert.alert('Erreur', 'workorderid / siteid manquant');
+                            return;
+                          }
+                          navigation.navigate('AddActualMaterial' as any, {
+                            workorderid: details.workorderid,
+                            siteid: details.siteid,
+                          });
+                        } else if (category.key === "Main d'œuvre réelle") {
+                          if (!details.workorderid || !details.siteid) {
+                            Alert.alert('Erreur', 'workorderid / siteid manquant');
+                            return;
+                          }
+                          navigation.navigate('AddActualLabor' as any, {
                             workorderid: details.workorderid,
                             siteid: details.siteid,
                           });
@@ -327,6 +374,7 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
                         }
                       }}
                       style={styles.plusButton}
+                      activeOpacity={0.85}
                     >
                       <FeatherIcon name="plus" size={20} color="#fff" />
                     </TouchableOpacity>
@@ -338,20 +386,20 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
         </View>
       </ScrollView>
 
-          <StatusChangeModal
-      visible={statusModalVisible}
-      entityType="WO"
-      currentStatus={currentStatus}
-      href={details.href ?? ''}     // ✅ use "href" prop name
-      username={username || ''}
-      password={password || ''}
-      onClose={() => setStatusModalVisible(false)}
-      onSuccess={async ({ code, label }) => {
-        setCurrentStatus(code);
-        setCurrentStatusLabel(label || code);
-        setTimeout(() => refresh(), 300);
-      }}
-    />
+      <StatusChangeModal
+        visible={statusModalVisible}
+        entityType="WO"
+        currentStatus={currentStatus}
+        href={(details as any).href ?? ''}
+        username={username || ''}
+        password={password || ''}
+        onClose={() => setStatusModalVisible(false)}
+        onSuccess={async ({ code, label }) => {
+          setCurrentStatus(code);
+          setCurrentStatusLabel(label || code);
+          setTimeout(() => refresh(), 300);
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -359,71 +407,23 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8fafc' },
 
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#1e3a8a',
-  },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#1e3a8a' },
   loadingText: { marginTop: 16, fontSize: 16, color: '#3b82f6', fontWeight: '600' },
 
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 32,
-    backgroundColor: '#f8fafc',
-  },
-  errorMessage: {
-    fontSize: 15,
-    color: '#64748b',
-    textAlign: 'center',
-    marginTop: 16,
-    marginBottom: 24,
-    lineHeight: 22,
-  },
+  errorContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32, backgroundColor: '#f8fafc' },
+  errorMessage: { fontSize: 15, color: '#64748b', textAlign: 'center', marginTop: 16, marginBottom: 24, lineHeight: 22 },
+
   retryButton: { borderRadius: 12, overflow: 'hidden' },
-  retryButtonGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 24,
-    paddingVertical: 14,
-  },
+  retryButtonGradient: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 24, paddingVertical: 14 },
   retryButtonText: { fontSize: 16, fontWeight: '700', color: '#fff' },
 
-  header: {
-    paddingHorizontal: 15,
-    paddingTop: 11,
-    paddingBottom: 20,
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
-  },
-  headerTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  backButton: {
-    width: 44,
-    height: 44,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  header: { paddingBottom: 20, borderBottomLeftRadius: 24, borderBottomRightRadius: 24 },
+  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  backButton: { width: 44, height: 44, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { fontSize: 18, fontWeight: '700', color: '#fff' },
 
   woCard: { backgroundColor: 'rgba(255,255,255,0.98)', borderRadius: 10, padding: 10, marginBottom: 8 },
-  woHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-    flexWrap: 'wrap',
-    gap: 8,
-  },
+  woHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, flexWrap: 'wrap', gap: 8 },
   woLabel: { fontSize: 12, color: '#64748b', fontWeight: '600' },
   woNumber: { fontSize: 20, fontWeight: '800', color: '#3b82f6', marginTop: 2 },
 
@@ -431,17 +431,7 @@ const styles = StyleSheet.create({
   statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12 },
   statusBadgeText: { fontSize: 12, fontWeight: '700' },
 
-  statusChangeBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    backgroundColor: '#eff6ff',
-    borderWidth: 1.5,
-    borderColor: '#3b82f6',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
+  statusChangeBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#eff6ff', borderWidth: 1.5, borderColor: '#3b82f6', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12 },
   statusChangeBtnText: { fontSize: 12, fontWeight: '700', color: '#2563eb' },
 
   description: { fontSize: 15, fontWeight: '500', color: '#0f172a', lineHeight: 22, marginBottom: 16 },
@@ -451,47 +441,17 @@ const styles = StyleSheet.create({
   infoLabel: { fontSize: 12, color: '#64748b' },
   infoValue: { fontSize: 14, fontWeight: '600', color: '#0f172a' },
 
-  content: { flex: 1, paddingHorizontal: 20, paddingTop: 24 },
+  content: { flex: 1 },
   sectionTitle: { fontSize: 20, fontWeight: '800', color: '#0f172a', marginBottom: 16 },
-  categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 16 },
 
-  categoryCard: {
-    width: CARD_WIDTH,
-    height: CARD_WIDTH,
-    borderRadius: 20,
-    overflow: 'hidden',
-  },
+  categoryGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  categoryCard: { borderRadius: 20, overflow: 'hidden' },
   categoryGradient: { flex: 1, padding: 20, justifyContent: 'flex-start', position: 'relative' },
-  plusButton: {
-    position: 'absolute',
-    bottom: 16,
-    right: 16,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.3)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  categoryIconContainer: {
-    width: 56,
-    height: 56,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+
+  plusButton: { position: 'absolute', bottom: 16, right: 16, width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.3)', alignItems: 'center', justifyContent: 'center' },
+  categoryIconContainer: { width: 56, height: 56, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
   categoryName: { fontSize: 16, fontWeight: '700', color: '#fff', marginTop: 12 },
-  categoryCount: {
-    position: 'absolute',
-    top: 16,
-    right: 16,
-    backgroundColor: 'rgba(255,255,255,0.3)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    minWidth: 32,
-    alignItems: 'center',
-  },
+
+  categoryCount: { position: 'absolute', top: 16, right: 16, backgroundColor: 'rgba(255,255,255,0.3)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, minWidth: 32, alignItems: 'center' },
   categoryCountText: { fontSize: 14, fontWeight: '800', color: '#fff' },
 });

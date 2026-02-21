@@ -8,12 +8,24 @@ import { makeToken } from './maximoClient';
 import { rewriteDoclinkUrl, metaToDoclinkUrl, doclinkToMetaUrl } from './doclinks';
 
 const BASE_URL = `${MAXIMO.OSLC_OS}/mxwo`;
+const MXWO_DETAILS_URL = `${MAXIMO.OSLC_OS}/sm_mxwodetails`;
 
+// --------------------------
+// Helpers
+// --------------------------
 export const parseLabHrs = (val: string | number | undefined): number => {
-  if (!val) return 0;
+  if (val === undefined || val === null || val === '') return 0;
   if (typeof val === 'number') return val;
-  const p = String(val).split(':').map(Number);
-  return p.length === 2 ? p[0] + p[1] / 60 : Number(val) || 0;
+
+  // handle "HH:MM"
+  const s = String(val).trim();
+  if (s.includes(':')) {
+    const [h, m] = s.split(':').map((x) => Number(x));
+    return (h || 0) + ((m || 0) / 60);
+  }
+
+  const n = Number(s);
+  return isNaN(n) ? 0 : n;
 };
 
 function safeTrim(v: any): string {
@@ -33,6 +45,35 @@ function pickDocInfo(d: any): any | null {
   return null;
 }
 
+/** ✅ Maximo collections can be: [] or {member: []} or single object */
+function toArrayAny(v: any): any[] {
+  if (!v) return [];
+  if (Array.isArray(v)) return v;
+  if (Array.isArray(v?.member)) return v.member;
+  return [v];
+}
+
+/** ✅ get key in many possible forms (case differences) */
+function pickAnyKey(obj: any, keys: string[]): any {
+  if (!obj) return undefined;
+
+  // direct
+  for (const k of keys) if (obj[k] !== undefined) return obj[k];
+
+  // case-insensitive search
+  const lowerMap: Record<string, any> = {};
+  Object.keys(obj).forEach((k) => (lowerMap[k.toLowerCase()] = obj[k]));
+  for (const k of keys) {
+    const v = lowerMap[k.toLowerCase()];
+    if (v !== undefined) return v;
+  }
+
+  return undefined;
+}
+
+// --------------------------
+// Doclinks
+// --------------------------
 export type NormalizedDocLink = {
   document: string;
   description: string;
@@ -100,10 +141,7 @@ export function normalizeDoclinks(raw: any): NormalizedDocLink[] {
       (doclinkId ? `Document ${doclinkId}` : '') ||
       'Document sans nom';
 
-    const desc =
-      safeTrim(d?.description) ||
-      safeTrim(di?.description) ||
-      'Aucune description';
+    const desc = safeTrim(d?.description) || safeTrim(di?.description) || 'Aucune description';
 
     const createdate =
       safeTrim(di?.createdate) ||
@@ -135,16 +173,7 @@ export async function getDoclinkDetailsByHref(
   const token = makeToken(username, password);
 
   const fixed = rewriteDoclinkUrl(metaToDoclinkUrl(anyHref));
-
-  console.log('==============================');
-  console.log('🔎 [getDoclinkDetailsByHref] input:', anyHref);
-  console.log('🔎 [getDoclinkDetailsByHref] fixed:', fixed);
-
-  if (!fixed) {
-    console.log('❌ [getDoclinkDetailsByHref] empty fixed url');
-    console.log('==============================');
-    return null;
-  }
+  if (!fixed) return null;
 
   try {
     const res = await axios.get<any>(fixed, {
@@ -158,7 +187,7 @@ export async function getDoclinkDetailsByHref(
         lean: 1,
         'oslc.select': '*,docinfo{*},describedBy{*}',
         'oslc.expand': 'docinfo,describedBy',
-        _ts: Date.now(), // ✅ cache-buster safe here too
+        _ts: Date.now(),
       },
       timeout: 30000,
       validateStatus: () => true,
@@ -185,9 +214,7 @@ export async function getDoclinkDetailsByHref(
       safeTrim(di?.title) ||
       safeTrim(di?.filename) ||
       safeTrim(obj?.doctitle) ||
-      safeTrim(obj?.title) ||
-      (safeTrim(obj?.document) && !safeTrim(obj?.document).match(/^\d+$/) ? safeTrim(obj?.document) : '') ||
-      (safeTrim(di?.document) && !safeTrim(di?.document).match(/^\d+$/) ? safeTrim(di?.document) : '');
+      safeTrim(obj?.title);
 
     const desc =
       safeTrim(obj?.description) ||
@@ -204,11 +231,7 @@ export async function getDoclinkDetailsByHref(
       safeTrim(di?.changedate) ||
       '';
 
-    const rawUrl =
-      safeTrim(obj?.urlname) ||
-      safeTrim(di?.urlname) ||
-      safeTrim(obj?.href) ||
-      safeTrim(di?.href);
+    const rawUrl = safeTrim(obj?.urlname) || safeTrim(di?.urlname) || safeTrim(obj?.href) || safeTrim(di?.href);
 
     const urlname = rewriteDoclinkUrl(rawUrl);
     const href = rewriteDoclinkUrl(metaToDoclinkUrl(safeTrim(obj?.href) || safeTrim(di?.href)));
@@ -222,9 +245,7 @@ export async function getDoclinkDetailsByHref(
       urlname: urlname || undefined,
       href: href || undefined,
     };
-  } catch (err: any) {
-    console.log('❌ [getDoclinkDetailsByHref] error status:', err?.response?.status);
-    console.log('❌ [getDoclinkDetailsByHref] message:', err?.message || err);
+  } catch {
     return null;
   }
 }
@@ -237,7 +258,6 @@ export async function getDoclinkMetaByHref(
   const token = makeToken(username, password);
 
   const metaUrl = rewriteDoclinkUrl(doclinkToMetaUrl(anyHref));
-
   if (!metaUrl) return null;
 
   try {
@@ -252,7 +272,7 @@ export async function getDoclinkMetaByHref(
         lean: 1,
         'oslc.select': '*,docinfo{*},describedBy{*}',
         'oslc.expand': 'docinfo,describedBy',
-        _ts: Date.now(), // ✅ cache-buster
+        _ts: Date.now(),
       },
       timeout: 30000,
       validateStatus: () => true,
@@ -279,9 +299,7 @@ export async function getDoclinkMetaByHref(
       safeTrim(di?.title) ||
       safeTrim(di?.filename) ||
       safeTrim(obj?.doctitle) ||
-      safeTrim(obj?.title) ||
-      (safeTrim(obj?.document) && !safeTrim(obj?.document).match(/^\d+$/) ? safeTrim(obj?.document) : '') ||
-      (safeTrim(di?.document) && !safeTrim(di?.document).match(/^\d+$/) ? safeTrim(di?.document) : '');
+      safeTrim(obj?.title);
 
     const desc =
       safeTrim(obj?.description) ||
@@ -298,11 +316,7 @@ export async function getDoclinkMetaByHref(
       safeTrim(di?.changedate) ||
       '';
 
-    const rawUrl =
-      safeTrim(obj?.urlname) ||
-      safeTrim(di?.urlname) ||
-      safeTrim(obj?.href) ||
-      safeTrim(di?.href);
+    const rawUrl = safeTrim(obj?.urlname) || safeTrim(di?.urlname) || safeTrim(obj?.href) || safeTrim(di?.href);
 
     const urlname = rewriteDoclinkUrl(rawUrl);
 
@@ -319,11 +333,85 @@ export async function getDoclinkMetaByHref(
       urlname: urlname || undefined,
       href: href || undefined,
     };
-  } catch (err: any) {
+  } catch {
     return null;
   }
 }
 
+// --------------------------
+// ✅ ACTUALS (LABTRANS + MATUSETRANS) - FIXED
+// --------------------------
+export type ActualLaborItem = { laborcode: string; regularhrs: number };
+export type ActualMaterialItem = { itemnum: string; itemqty: number; description: string };
+
+export async function getActualMaterialAndLabor(
+  wonum: string,
+  siteid: string,
+  username: string,
+  password: string
+): Promise<{ actualLabor: ActualLaborItem[]; actualMaterials: ActualMaterialItem[] }> {
+  const token = makeToken(username, password);
+
+  const res = await axios.get<any>(MXWO_DETAILS_URL, {
+    headers: {
+      MAXAUTH: token,
+      Authorization: `Basic ${token}`,
+      Accept: 'application/json',
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache',
+    },
+    params: {
+      lean: 1,
+      'oslc.select': 'wonum,LABTRANS{laborcode,regularhrs},MATUSETRANS{itemnum,itemqty,description}',
+      'oslc.where': `wonum="${wonum}" and siteid="${siteid}"`,
+      ignorecollectionref: 1,
+      'oslc.pageSize': 1,
+      _ts: Date.now(),
+    },
+    timeout: 30000,
+    validateStatus: () => true,
+  });
+
+  if (res.status >= 400) {
+    console.log('❌ [getActualMaterialAndLabor] status:', res.status);
+    return { actualLabor: [], actualMaterials: [] };
+  }
+
+  const obj = res.data?.member?.[0] ?? res.data ?? {};
+
+  // ✅ handle many key variants:
+  const labRaw = pickAnyKey(obj, ['LABTRANS', 'labtrans']);
+  const matRaw = pickAnyKey(obj, ['MATUSETRANS', 'matusetrans']);
+
+  const labArr = toArrayAny(labRaw);
+  const matArr = toArrayAny(matRaw);
+
+  // Debug (remove later)
+  console.log('✅ [getActualMaterialAndLabor] wonum:', wonum, 'siteid:', siteid);
+  console.log('✅ [getActualMaterialAndLabor] LABTRANS count:', labArr.length);
+  console.log('✅ [getActualMaterialAndLabor] MATUSETRANS count:', matArr.length);
+
+  const actualLabor: ActualLaborItem[] = labArr
+    .map((l: any) => ({
+      laborcode: safeTrim(pickAnyKey(l, ['laborcode', 'LABORCODE'])),
+      regularhrs: parseLabHrs(pickAnyKey(l, ['regularhrs', 'REGULARHRS'])),
+    }))
+    .filter((x) => !!x.laborcode || x.regularhrs > 0);
+
+  const actualMaterials: ActualMaterialItem[] = matArr
+    .map((m: any) => ({
+      itemnum: safeTrim(pickAnyKey(m, ['itemnum', 'ITEMNUM'])),
+      itemqty: Number(pickAnyKey(m, ['itemqty', 'ITEMQTY']) ?? 0),
+      description: safeTrim(pickAnyKey(m, ['description', 'DESCRIPTION'])) || '—',
+    }))
+    .filter((x) => !!x.itemnum || x.itemqty > 0);
+
+  return { actualLabor, actualMaterials };
+}
+
+// --------------------------
+// Work Order Details
+// --------------------------
 interface MaximoWorkOrderItem {
   href?: string;
 
@@ -363,11 +451,6 @@ export async function getWorkOrderDetails(
 ): Promise<WorkOrder | null> {
   const token = makeToken(username, password);
 
-  console.log('==============================');
-  console.log('📥 [getWorkOrderDetails] wonum:', wonum);
-  console.log('📥 [getWorkOrderDetails] BASE_URL:', BASE_URL);
-  console.log('==============================');
-
   try {
     const res = await axios.get<MaximoResponse>(BASE_URL, {
       headers: {
@@ -375,8 +458,6 @@ export async function getWorkOrderDetails(
         Authorization: `Basic ${token}`,
         Accept: 'application/json',
         properties: '*',
-
-        // ✅ force no cache
         'Cache-Control': 'no-cache',
         Pragma: 'no-cache',
       },
@@ -384,8 +465,6 @@ export async function getWorkOrderDetails(
         lean: 1,
         'oslc.where': `wonum="${wonum}"`,
         'oslc.pageSize': 1,
-
-        // ✅ IMPORTANT: include href on WO + on woactivity
         'oslc.select':
           'href,wonum,description,status,assetnum,asset.description,location,locationdescription,priority,siteid,workorderid,ishistory,' +
           'scheduledstart,scheduledfinish,' +
@@ -395,10 +474,7 @@ export async function getWorkOrderDetails(
           'doclinks{href,urlname,document,description,createdate,creationdate,changedate,' +
           'describedBy{description,href},' +
           'docinfo{document,description,createdate,creationdate,changedate,urlname,doctitle,title,href}}',
-
         'oslc.expand': 'doclinks{docinfo},doclinks{describedBy}',
-
-        // ✅ cache buster (most important)
         _ts: Date.now(),
       },
       timeout: 30000,
@@ -414,7 +490,6 @@ export async function getWorkOrderDetails(
       typeof item.location === 'string' ? item.location : (item.location as any)?.location ?? '';
 
     const locDesc = item.locationdescription ?? loc ?? '';
-
     const docLinksArr = normalizeDoclinks(item.doclinks);
 
     const activitiesRaw = Array.isArray(item.woactivity)
@@ -468,21 +543,19 @@ export async function getWorkOrderDetails(
         };
       }),
 
-      labor: (Array.isArray(item.wplabor) ? item.wplabor : item.wplabor ? [item.wplabor] : []).map((l) => ({
-        taskid: String((l as any)?.taskid ?? ''),
-        laborcode: (l as any)?.laborcode ?? '',
-        description: (l as any)?.description ?? '',
-        labhrs: parseLabHrs((l as any)?.labhrs ?? (l as any)?.regularhrs ?? (l as any)?.laborhrs),
+      labor: toArrayAny(item.wplabor).map((l: any) => ({
+        taskid: String(l?.taskid ?? ''),
+        laborcode: l?.laborcode ?? '',
+        description: l?.description ?? '',
+        labhrs: parseLabHrs(l?.labhrs ?? l?.regularhrs ?? l?.laborhrs),
       })),
 
-      materials: (Array.isArray(item.wpmaterial) ? item.wpmaterial : item.wpmaterial ? [item.wpmaterial] : []).map(
-        (m) => ({
-          taskid: String((m as any)?.taskid ?? ''),
-          itemnum: (m as any)?.itemnum ?? '',
-          description: (m as any)?.description ?? '',
-          quantity: Number((m as any)?.itemqty ?? 0),
-        })
-      ),
+      materials: toArrayAny(item.wpmaterial).map((m: any) => ({
+        taskid: String(m?.taskid ?? ''),
+        itemnum: m?.itemnum ?? '',
+        description: m?.description ?? '',
+        quantity: Number(m?.itemqty ?? 0),
+      })),
 
       docLinks: docLinksArr as any,
     };
@@ -490,7 +563,6 @@ export async function getWorkOrderDetails(
     return wo;
   } catch (err: any) {
     console.error('❌ [getWorkOrderDetails] error status:', err?.response?.status);
-    console.error('❌ [getWorkOrderDetails] error data:', JSON.stringify(err?.response?.data)?.slice(0, 2500));
     console.error('❌ [getWorkOrderDetails] message:', err?.message || err);
     return null;
   }

@@ -3,7 +3,10 @@
 export interface MaximoResponse<T> {
   member?: T[];
 }
-
+export type ActualLaborItem = {
+  laborcode: string;
+  regularhrs: number;
+};
 export interface MaximoActivity {
   taskid?: string;
   description?: string;
@@ -45,6 +48,8 @@ export interface MaximoWorkOrderItem {
   WOACTIVITY?: MaximoActivity[];
   WPLABOR?: MaximoLabor[];
   WPMATERIAL?: MaximoMaterial[];
+
+  
 
   DOCLINKS?: {
     member?: MaximoDocLink[];

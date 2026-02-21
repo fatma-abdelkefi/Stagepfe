@@ -1,8 +1,14 @@
 // src/viewmodels/WorkOrderDetailsViewModel.ts
 import { useState, useEffect, useCallback, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getWorkOrderDetails, getDoclinkDetailsByHref } from '../services/workOrderDetailsService';
-import { rewriteMaximoUrl } from '../services/rewriteMaximoUrl'; // ✅ NEW
+import {
+  getWorkOrderDetails,
+  getDoclinkDetailsByHref,
+  getActualMaterialAndLabor,
+  type ActualLaborItem,
+  type ActualMaterialItem,
+} from '../services/workOrderDetailsService';
+import { rewriteMaximoUrl } from '../services/rewriteMaximoUrl';
 import type { WorkOrder, ActivityItem, LaborItem, MaterialItem, DocLinkItem } from './WorkOrdersViewModel';
 
 export function parseLabHrs(labhrs: string | number | undefined | null): number {
@@ -39,17 +45,21 @@ export function useWorkOrderDetails(wonum: string) {
   // ✅ Avoid parallel calls
   const inFlightRef = useRef(false);
 
-  // ✅ If refresh is called during a request, queue one more refresh afterwards
+  // ✅ If refresh called while request in flight, queue one refresh
   const pendingRefreshRef = useRef(false);
 
   const enrichDocLinks = useCallback(
     async (details: WorkOrder, username: string, password: string) => {
-      const docs: DocLinkItem[] = details.docLinks ?? [];
+      const docs: DocLinkItem[] = (details as any).docLinks ?? [];
       if (!docs.length) return details;
 
       const needs = docs
         .map((d, idx) => ({ d, idx, href: getHref(d) }))
-        .filter((x) => !!x.href && (looksLikeId(x.d.document) || !String(x.d.createdate || '').trim()));
+        .filter(
+          (x) =>
+            !!x.href &&
+            (looksLikeId((x.d as any).document) || !String((x.d as any).createdate || '').trim())
+        );
 
       if (!needs.length) return details;
 
@@ -60,16 +70,16 @@ export function useWorkOrderDetails(wonum: string) {
         if (!extra) continue;
 
         updated[n.idx] = {
-          ...updated[n.idx],
-          document: extra.document || updated[n.idx].document,
-          description: extra.description || updated[n.idx].description,
-          createdate: extra.createdate || updated[n.idx].createdate,
-          urlname: extra.urlname || updated[n.idx].urlname,
-          href: extra.href || (updated[n.idx] as any).href,
+          ...(updated[n.idx] as any),
+          document: (extra as any).document || (updated[n.idx] as any).document,
+          description: (extra as any).description || (updated[n.idx] as any).description,
+          createdate: (extra as any).createdate || (updated[n.idx] as any).createdate,
+          urlname: (extra as any).urlname || (updated[n.idx] as any).urlname,
+          href: (extra as any).href || (updated[n.idx] as any).href,
         } as any;
       }
 
-      return { ...details, docLinks: updated };
+      return { ...(details as any), docLinks: updated } as any;
     },
     []
   );
@@ -78,7 +88,7 @@ export function useWorkOrderDetails(wonum: string) {
     async (mode: 'initial' | 'refresh') => {
       if (!wonum) return;
 
-      // If a request is already running:
+      // If already running, queue refresh if requested
       if (inFlightRef.current) {
         if (mode === 'refresh') pendingRefreshRef.current = true;
         return;
@@ -94,22 +104,33 @@ export function useWorkOrderDetails(wonum: string) {
         const password = await AsyncStorage.getItem('@password');
         if (!username || !password) throw new Error('Identifiants non trouvés');
 
-        // ✅ Fetch fresh from server
+        // 1) base details
         const details = await getWorkOrderDetails(wonum, username, password);
         if (!details) throw new Error("Impossible de charger les détails de cet ordre de travail.");
 
-        // ✅ IMPORTANT: rewrite href returned by Maximo (often internal IP)
         const safeWoHref = rewriteMaximoUrl((details as any)?.href);
 
-        const normalized: WorkOrder = {
-          ...details,
+        // 2) actuals (requires siteid)
+        let actualLabor: ActualLaborItem[] = [];
+        let actualMaterials: ActualMaterialItem[] = [];
 
-          // ✅ keep safe href to allow status change to work everywhere
+        const siteid = (details as any)?.siteid;
+        if (siteid) {
+          const actual = await getActualMaterialAndLabor(wonum, siteid, username, password);
+          actualLabor = actual.actualLabor;
+          actualMaterials = actual.actualMaterials;
+        }
+
+        // 3) normalize for UI
+        // ✅ IMPORTANT: cast as WorkOrder at the end so it compiles even if WorkOrder type
+        // does not yet include actualLabor/actualMaterials (workaround).
+        const normalized = {
+          ...(details as any),
+
           href: safeWoHref || (details as any)?.href,
+          locationDescription: (details as any).locationDescription ?? '',
 
-          locationDescription: details.locationDescription ?? '',
-
-          activities: (details.activities ?? []).map((a: any): ActivityItem => {
+          activities: ((details as any).activities ?? []).map((a: any): ActivityItem => {
             const rawHref = getActivityHref(a);
             const safeHref = rewriteMaximoUrl(rawHref);
 
@@ -117,7 +138,7 @@ export function useWorkOrderDetails(wonum: string) {
             const statut = String(a.statut ?? a.status ?? '').trim();
 
             return {
-              href: safeHref, // ✅ rewritten
+              href: safeHref,
               taskid: String(a.taskid ?? ''),
               description: a.description ?? '',
               status,
@@ -126,27 +147,30 @@ export function useWorkOrderDetails(wonum: string) {
             };
           }),
 
-          labor: (details.labor ?? []).map((l: any): LaborItem => ({
+          labor: ((details as any).labor ?? []).map((l: any): LaborItem => ({
             taskid: String(l.taskid ?? ''),
             laborcode: l.laborcode ?? '',
             description: l.description ?? '',
             labhrs: parseLabHrs(l.labhrs),
           })),
 
-          materials: (details.materials ?? []).map((m: any): MaterialItem => ({
+          materials: ((details as any).materials ?? []).map((m: any): MaterialItem => ({
             taskid: String(m.taskid ?? ''),
             itemnum: m.itemnum ?? '',
             description: m.description ?? '',
             quantity: Number(m.quantity ?? 0),
           })),
 
-          docLinks: details.docLinks ?? [],
-        };
+          docLinks: (details as any).docLinks ?? [],
 
-        // ✅ Update UI immediately
+          // ✅ actual fields (réel)
+          actualLabor,
+          actualMaterials,
+        } as WorkOrder;
+
         setWorkOrder(normalized);
 
-        // ✅ Enrich doclinks after (optional)
+        // 4) optional doclink enrichment
         const enriched = await enrichDocLinks(normalized, username, password);
         setWorkOrder(enriched);
       } catch (e: any) {
@@ -156,7 +180,7 @@ export function useWorkOrderDetails(wonum: string) {
         mode === 'initial' ? setLoading(false) : setRefreshing(false);
         inFlightRef.current = false;
 
-        // ✅ If refresh was requested while request was running, run it now
+        // If refresh was requested during in-flight request, run it now
         if (pendingRefreshRef.current) {
           pendingRefreshRef.current = false;
           fetchDetails('refresh');
@@ -176,7 +200,6 @@ export function useWorkOrderDetails(wonum: string) {
     fetchDetails('initial');
   }, [fetchDetails, wonum]);
 
-  // ✅ Always refresh when called
   const refresh = useCallback(() => {
     fetchDetails('refresh');
   }, [fetchDetails]);
