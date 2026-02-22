@@ -14,17 +14,42 @@ export function rewriteToMaximoOrigin(url: string): string {
   const u = String(url || '').trim();
   if (!u) return '';
 
-  // If it's already an absolute URL, parse it safely
+  // Make sure origin has no trailing slash
+  const origin = String(MAXIMO.ORIGIN || '').replace(/\/+$/, '');
+
   try {
     const parsed = new URL(u);
+
     // keep only pathname + search
-    const path = parsed.pathname.replace(/\/+/g, '/');
+    let path = parsed.pathname.replace(/\/+/g, '/');
     const search = parsed.search || '';
-    return `${MAXIMO.ORIGIN}${path}${search}`.replace(/\/+$/, '');
+
+    // ✅ remove duplicate "/maximo/maximo"
+    path = path.replace(/\/maximo\/maximo\b/g, '/maximo');
+
+    // ✅ if pathname already starts with "/maximo/..." but origin already ends with "/maximo"
+    // then remove the first "/maximo" to avoid "/maximo/maximo"
+    if (origin.endsWith('/maximo') && path.startsWith('/maximo/')) {
+      path = path.replace(/^\/maximo\b/, '');
+      if (!path.startsWith('/')) path = `/${path}`;
+    }
+
+    return `${origin}${path}${search}`.replace(/\/+$/, '');
   } catch {
     // relative url
-    const cleaned = u.startsWith('/') ? u : `/${u}`;
-    return `${MAXIMO.ORIGIN}${cleaned}`.replace(/\/+$/, '');
+    let cleaned = u.startsWith('/') ? u : `/${u}`;
+    cleaned = cleaned.replace(/\/+/g, '/');
+
+    // ✅ remove duplicate "/maximo/maximo"
+    cleaned = cleaned.replace(/\/maximo\/maximo\b/g, '/maximo');
+
+    // ✅ avoid origin "/maximo" + cleaned "/maximo/..."
+    if (origin.endsWith('/maximo') && cleaned.startsWith('/maximo/')) {
+      cleaned = cleaned.replace(/^\/maximo\b/, '');
+      if (!cleaned.startsWith('/')) cleaned = `/${cleaned}`;
+    }
+
+    return `${origin}${cleaned}`.replace(/\/+$/, '');
   }
 }
 
@@ -71,8 +96,6 @@ export function rewriteToMaximoOslcOs(url: string): string {
 
   // Now enforce /oslc/os prefix (not /oslc only)
   if (path.startsWith('/oslc/') && !path.startsWith('/oslc/os/')) {
-    // convert "/oslc/xxx" -> "/oslc/os/xxx" only if it should be OS endpoint
-    // if it’s already "/oslc/" but not "/oslc/os/", we add "/os"
     path = path.replace(/^\/oslc\//, '/oslc/os/');
   }
 
@@ -81,14 +104,15 @@ export function rewriteToMaximoOslcOs(url: string): string {
 
   // Ensure it starts with /oslc/os
   if (!path.startsWith('/oslc/os/')) {
-    // If it was like "/mxwo/..." (rare), force it
     path = `/oslc/os/${path.replace(/^\/+/, '')}`;
   }
 
   // Remove accidental "//"
   path = path.replace(/\/+/g, '/');
 
-  return `${MAXIMO.ORIGIN}${path}${query}`.replace(/\/+$/, '');
+  // IMPORTANT: MAXIMO.ORIGIN already includes /maximo
+  const origin = String(MAXIMO.ORIGIN || '').replace(/\/+$/, '');
+  return `${origin}${path}${query}`.replace(/\/+$/, '');
 }
 
 /**

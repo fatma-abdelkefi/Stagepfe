@@ -21,6 +21,11 @@ import DetailsActualMaterialsScreen from '../views/DetailsActualMaterialsScreen'
 import AddMaterialScreen from '../views/AddMaterialScreen';
 import AddLaborScreen from '../views/AddLaborScreen';
 import AddDoclinkScreen from '../views/AddDoclinkScreen';
+import AddActualMaterialScreen from '../views/AddActualMaterialScreen';
+import AddActualLaborScreen from '../views/AddActualLaborScreen';
+
+import DetailsWorkLogScreen from '../views/DetailsWorkLogScreen';
+import AddWorkLogScreen from '../views/AddWorkLogScreen';
 
 import type { WorkOrder } from '../viewmodels/WorkOrdersViewModel';
 import { useAuth } from '../context/AuthContext';
@@ -63,6 +68,16 @@ export type RootStackParamList = {
   AddDoclink: {
     ownerid: number;
     siteid: string;
+  };
+  AddActualMaterial: { woHref: string };
+AddActualLabor: { woHref: string };
+
+DetailsWorkLog: { workOrder: any }; 
+  AddWorkLog: {
+    wonum: string;
+    siteid?: string;
+    workorderid?: number | string;
+    mxwoDetailsHref?: string;
   };
 };
 
@@ -110,6 +125,19 @@ export default function AppNavigator() {
           <Stack.Screen name="AddLabor" component={AddLaborScreen} />
           <Stack.Screen name="AddMaterial" component={AddMaterialScreen} />
           <Stack.Screen name="AddDoclink" component={AddDoclinkScreen} />
+          <Stack.Screen name="AddActualMaterial" component={AddActualMaterialScreen} />
+          <Stack.Screen name="AddActualLabor" component={AddActualLaborScreen} />
+          <Stack.Screen
+            name="DetailsWorkLog"
+            component={DetailsWorkLogScreen}
+            options={{ title: 'Work log' }}
+          />
+
+          <Stack.Screen
+            name="AddWorkLog"
+            component={AddWorkLogScreen}
+            options={{ title: 'Ajouter Work log' }}
+          />
         </>
       ) : (
         <Stack.Screen name="Login" component={LoginScreen} />

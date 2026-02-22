@@ -1,3 +1,4 @@
+// src/viewmodels/WorkOrdersViewModel.ts
 import { useState, useMemo } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getWorkOrderDetails } from '../services/workOrderDetailsService';
@@ -8,11 +9,10 @@ export type ActivityItem = {
   description?: string;
   status?: string;
   labhrs?: number;
-
-  href?: string; // ✅ KEEP
-
+  href?: string;
   statut?: string;
 };
+
 export type LaborItem = { taskid: string; laborcode?: string; description?: string; labhrs?: number };
 export type MaterialItem = { taskid: string; itemnum?: string; description?: string; quantity?: number };
 export type DocLinkItem = { document?: string; description?: string; createdate?: string; urlname?: string; docinfo?: any };
@@ -23,6 +23,10 @@ export type WPLaborItem = {
   description?: string;
   labhrs?: number;
 };
+
+// ✅ NEW: Actual types
+export type ActualLaborItem = { laborcode: string; regularhrs: number };
+export type ActualMaterialItem = { itemnum: string; itemqty: number; description?: string };
 
 export type WorkOrder = {
   wonum: string;
@@ -35,7 +39,7 @@ export type WorkOrder = {
   status: string;
   locationDescription: string;
 
-  href?: string; // ✅ KEEP for WO patch
+  href?: string;
 
   scheduledStart: string | null;
   scheduledFinish?: string | null;
@@ -61,6 +65,10 @@ export type WorkOrder = {
   docLinks?: DocLinkItem[];
   wplabor_collectionref?: string;
 
+  // ✅ NEW: these fix your TypeScript error
+  actualLabor?: ActualLaborItem[];
+  actualMaterials?: ActualMaterialItem[];
+
   actualStart?: string | null;
   actualFinish?: string | null;
   parentWo?: string;
@@ -73,6 +81,7 @@ export type WorkOrder = {
   materialStatusDirect?: string;
   materialStatusPackage?: string;
   materialStatusLastUpdated?: string;
+
 };
 
 // ─── Helpers ─────────────────────────────────────────
@@ -81,9 +90,9 @@ function safeStr(v: any): string {
 }
 
 export const parseLabHrs = (val: string | number | undefined): number => {
-  if (!val) return 0;
+  if (val === undefined || val === null || val === '') return 0;
   if (typeof val === 'number') return val;
-  const [h, m] = val.split(':').map(Number);
+  const [h, m] = String(val).split(':').map(Number);
   return (h || 0) + ((m || 0) / 60);
 };
 
@@ -161,6 +170,10 @@ function ensureWorkOrder(details: any, wonumFallback: string): WorkOrder {
     materialStatusDirect: details?.materialStatusDirect,
     materialStatusPackage: details?.materialStatusPackage,
     materialStatusLastUpdated: details?.materialStatusLastUpdated,
+
+    // ✅ defaults so screens never crash
+    actualLabor: Array.isArray(details?.actualLabor) ? details.actualLabor : [],
+    actualMaterials: Array.isArray(details?.actualMaterials) ? details.actualMaterials : [],
   };
 }
 
@@ -173,8 +186,8 @@ export function useWorkOrders() {
   const [barcodeFilter, setBarcodeFilter] = useState<string | null>(null);
 
   const toggleComplete = (wonum: string) => {
-    setData(prev =>
-      prev.map(item => (item.wonum === wonum ? { ...item, completed: !item.completed } : item))
+    setData((prev) =>
+      prev.map((item) => (item.wonum === wonum ? { ...item, completed: !item.completed } : item))
     );
   };
 
@@ -186,7 +199,7 @@ export function useWorkOrders() {
   };
 
   const filteredData = useMemo(() => {
-    return data.filter(item => {
+    return data.filter((item) => {
       if (barcodeFilter && item.barcode !== barcodeFilter) return false;
 
       const q = search.toLowerCase().trim();
@@ -230,7 +243,7 @@ export function useWorkOrders() {
   const todayCount = useMemo(() => {
     const todayStr = new Date().toDateString();
     return data.filter(
-      item =>
+      (item) =>
         item.scheduledStart &&
         new Date(item.scheduledStart).toDateString() === todayStr &&
         !item.completed
@@ -291,9 +304,7 @@ export function useWorkOrders() {
         })),
       };
 
-      setData(prev =>
-        prev.map(item => (item.wonum === wonum ? { ...item, ...woDetails } : item))
-      );
+      setData((prev) => prev.map((item) => (item.wonum === wonum ? { ...item, ...woDetails } : item)));
     } catch (err: any) {
       console.error('Erreur fetch WO:', err.message);
     }

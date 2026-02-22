@@ -4,9 +4,10 @@ import type { WorkOrder } from '../viewmodels/WorkOrdersViewModel';
 
 import { MAXIMO } from '../config/maximoUrls';
 import { makeToken } from './maximoClient';
-
 import { rewriteDoclinkUrl, metaToDoclinkUrl, doclinkToMetaUrl } from './doclinks';
+import { rewriteMaximoUrl } from './rewriteMaximoUrl';
 
+// ✅ Maximo endpoints
 const BASE_URL = `${MAXIMO.OSLC_OS}/mxwo`;
 const MXWO_DETAILS_URL = `${MAXIMO.OSLC_OS}/sm_mxwodetails`;
 
@@ -17,15 +18,16 @@ export const parseLabHrs = (val: string | number | undefined): number => {
   if (val === undefined || val === null || val === '') return 0;
   if (typeof val === 'number') return val;
 
-  // handle "HH:MM"
   const s = String(val).trim();
+  if (!s) return 0;
+
   if (s.includes(':')) {
     const [h, m] = s.split(':').map((x) => Number(x));
     return (h || 0) + ((m || 0) / 60);
   }
 
   const n = Number(s);
-  return isNaN(n) ? 0 : n;
+  return Number.isFinite(n) ? n : 0;
 };
 
 function safeTrim(v: any): string {
@@ -45,7 +47,6 @@ function pickDocInfo(d: any): any | null {
   return null;
 }
 
-/** ✅ Maximo collections can be: [] or {member: []} or single object */
 function toArrayAny(v: any): any[] {
   if (!v) return [];
   if (Array.isArray(v)) return v;
@@ -53,22 +54,54 @@ function toArrayAny(v: any): any[] {
   return [v];
 }
 
-/** ✅ get key in many possible forms (case differences) */
 function pickAnyKey(obj: any, keys: string[]): any {
   if (!obj) return undefined;
 
-  // direct
   for (const k of keys) if (obj[k] !== undefined) return obj[k];
 
-  // case-insensitive search
   const lowerMap: Record<string, any> = {};
   Object.keys(obj).forEach((k) => (lowerMap[k.toLowerCase()] = obj[k]));
   for (const k of keys) {
     const v = lowerMap[k.toLowerCase()];
     if (v !== undefined) return v;
   }
-
   return undefined;
+}
+
+type MaximoErrorPayload = {
+  message?: string;
+  reasonCode?: string;
+  statusCode?: string | number;
+  href?: string;
+  error?: any;
+};
+
+function extractMaximoError(res: any): string {
+  const data = (res?.data ?? {}) as MaximoErrorPayload;
+
+  const parts: string[] = [];
+  if ((data as any)?.Error?.reasonCode) parts.push(String((data as any)?.Error?.reasonCode));
+  if ((data as any)?.Error?.message) parts.push(String((data as any)?.Error?.message));
+  if (data.reasonCode) parts.push(String(data.reasonCode));
+  if (data.message) parts.push(String(data.message));
+
+  const http = `HTTP ${res?.status ?? '??'}`;
+  if (parts.length) return `${http} - ${parts.join(' - ')}`;
+  return http;
+}
+
+function patchHeaders(token: string): any {
+  return {
+    MAXAUTH: token,
+    Authorization: `Basic ${token}`,
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+    'x-method-override': 'PATCH',
+    patchtype: 'MERGE',
+    'If-Match': '*',
+    'Cache-Control': 'no-cache',
+    Pragma: 'no-cache',
+  };
 }
 
 // --------------------------
@@ -89,10 +122,8 @@ export type NormalizedDocLink = {
 function extractDoclinkIdFromHref(href?: string): string {
   const h = safeTrim(href);
   if (!h) return '';
-
   const clean = h.split('?')[0].split('#')[0].replace(/\/+$/, '');
   const last = clean.split('/').pop() || '';
-
   return /^\d+$/.test(last) ? last : '';
 }
 
@@ -111,12 +142,7 @@ export function normalizeDoclinks(raw: any): NormalizedDocLink[] {
     const href = rewriteDoclinkUrl(metaToDoclinkUrl(safeTrim(d?.href) || safeTrim(di?.href)));
     const doclinkId = extractDoclinkIdFromHref(href);
 
-    const rawUrl =
-      safeTrim(d?.urlname) ||
-      safeTrim(di?.urlname) ||
-      safeTrim(di?.href) ||
-      safeTrim(d?.href);
-
+    const rawUrl = safeTrim(d?.urlname) || safeTrim(di?.urlname) || safeTrim(di?.href) || safeTrim(d?.href);
     const urlname = rewriteDoclinkUrl(rawUrl);
 
     const title =
@@ -171,7 +197,6 @@ export async function getDoclinkDetailsByHref(
   password: string
 ): Promise<Partial<NormalizedDocLink> | null> {
   const token = makeToken(username, password);
-
   const fixed = rewriteDoclinkUrl(metaToDoclinkUrl(anyHref));
   if (!fixed) return null;
 
@@ -205,16 +230,11 @@ export async function getDoclinkDetailsByHref(
       safeTrim(obj?.documenttitle) ||
       safeTrim(obj?.documentname) ||
       safeTrim(obj?.filename) ||
-      safeTrim(obj?.original_filename) ||
-      safeTrim(obj?.file_name) ||
       safeTrim(di?.upload_documentname) ||
       safeTrim(di?.documenttitle) ||
       safeTrim(di?.documentname) ||
       safeTrim(di?.doctitle) ||
-      safeTrim(di?.title) ||
-      safeTrim(di?.filename) ||
-      safeTrim(obj?.doctitle) ||
-      safeTrim(obj?.title);
+      safeTrim(di?.title);
 
     const desc =
       safeTrim(obj?.description) ||
@@ -290,16 +310,11 @@ export async function getDoclinkMetaByHref(
       safeTrim(obj?.documenttitle) ||
       safeTrim(obj?.documentname) ||
       safeTrim(obj?.filename) ||
-      safeTrim(obj?.original_filename) ||
-      safeTrim(obj?.file_name) ||
       safeTrim(di?.upload_documentname) ||
       safeTrim(di?.documenttitle) ||
       safeTrim(di?.documentname) ||
       safeTrim(di?.doctitle) ||
-      safeTrim(di?.title) ||
-      safeTrim(di?.filename) ||
-      safeTrim(obj?.doctitle) ||
-      safeTrim(obj?.title);
+      safeTrim(di?.title);
 
     const desc =
       safeTrim(obj?.description) ||
@@ -320,9 +335,7 @@ export async function getDoclinkMetaByHref(
 
     const urlname = rewriteDoclinkUrl(rawUrl);
 
-    const href = rewriteDoclinkUrl(
-      metaToDoclinkUrl(safeTrim(obj?.href) || safeTrim(di?.href) || metaUrl)
-    );
+    const href = rewriteDoclinkUrl(metaToDoclinkUrl(safeTrim(obj?.href) || safeTrim(di?.href) || metaUrl));
 
     const display = title || filenameFromUrl(urlname) || filenameFromUrl(href);
 
@@ -339,7 +352,7 @@ export async function getDoclinkMetaByHref(
 }
 
 // --------------------------
-// ✅ ACTUALS (LABTRANS + MATUSETRANS) - FIXED
+// ✅ ACTUALS GET (LABTRANS + MATUSETRANS) - FIXED + returns mxwoDetailsHref
 // --------------------------
 export type ActualLaborItem = { laborcode: string; regularhrs: number };
 export type ActualMaterialItem = { itemnum: string; itemqty: number; description: string };
@@ -349,7 +362,7 @@ export async function getActualMaterialAndLabor(
   siteid: string,
   username: string,
   password: string
-): Promise<{ actualLabor: ActualLaborItem[]; actualMaterials: ActualMaterialItem[] }> {
+): Promise<{ actualLabor: ActualLaborItem[]; actualMaterials: ActualMaterialItem[]; mxwoDetailsHref?: string }> {
   const token = makeToken(username, password);
 
   const res = await axios.get<any>(MXWO_DETAILS_URL, {
@@ -362,7 +375,7 @@ export async function getActualMaterialAndLabor(
     },
     params: {
       lean: 1,
-      'oslc.select': 'wonum,LABTRANS{laborcode,regularhrs},MATUSETRANS{itemnum,itemqty,description}',
+      'oslc.select': 'href,wonum,LABTRANS{laborcode,regularhrs},MATUSETRANS{itemnum,itemqty,description}',
       'oslc.where': `wonum="${wonum}" and siteid="${siteid}"`,
       ignorecollectionref: 1,
       'oslc.pageSize': 1,
@@ -372,24 +385,19 @@ export async function getActualMaterialAndLabor(
     validateStatus: () => true,
   });
 
-  if (res.status >= 400) {
-    console.log('❌ [getActualMaterialAndLabor] status:', res.status);
-    return { actualLabor: [], actualMaterials: [] };
-  }
+  if (res.status >= 400) return { actualLabor: [], actualMaterials: [], mxwoDetailsHref: '' };
 
   const obj = res.data?.member?.[0] ?? res.data ?? {};
 
-  // ✅ handle many key variants:
+  // ✅ THIS is the href needed for POST actuals
+  const mxwoDetailsHref = safeTrim(obj?.href);
+
+  // Maximo sometimes returns lower-case keys in JSON
   const labRaw = pickAnyKey(obj, ['LABTRANS', 'labtrans']);
   const matRaw = pickAnyKey(obj, ['MATUSETRANS', 'matusetrans']);
 
   const labArr = toArrayAny(labRaw);
   const matArr = toArrayAny(matRaw);
-
-  // Debug (remove later)
-  console.log('✅ [getActualMaterialAndLabor] wonum:', wonum, 'siteid:', siteid);
-  console.log('✅ [getActualMaterialAndLabor] LABTRANS count:', labArr.length);
-  console.log('✅ [getActualMaterialAndLabor] MATUSETRANS count:', matArr.length);
 
   const actualLabor: ActualLaborItem[] = labArr
     .map((l: any) => ({
@@ -406,11 +414,92 @@ export async function getActualMaterialAndLabor(
     }))
     .filter((x) => !!x.itemnum || x.itemqty > 0);
 
-  return { actualLabor, actualMaterials };
+  return { actualLabor, actualMaterials, mxwoDetailsHref };
 }
 
 // --------------------------
-// Work Order Details
+// ✅ ACTUALS POST (same as Postman) - FIXED + TS safe
+// --------------------------
+
+// 1) ✅ add actual material: MUST use matusetrans_reporting + PATCH override headers
+export async function addActualMaterial(
+  woHref: string, // should be mxwoDetailsHref (sm_mxwodetails member href)
+  username: string,
+  password: string,
+  payload: {
+    itemnum: string;
+    quantity: number;
+    storeloc: string;
+    issuetype: string; // "ISSUE"
+  }
+): Promise<void> {
+  const token = makeToken(username, password);
+
+  const fixedHref = rewriteMaximoUrl(woHref) || woHref;
+  const url = `${fixedHref}?lean=1`;
+
+  const res = await axios.post(
+    url,
+    {
+      matusetrans_reporting: [
+        {
+          itemnum: payload.itemnum,
+          quantity: payload.quantity,
+          storeloc: payload.storeloc,
+          issuetype: payload.issuetype,
+        },
+      ],
+    },
+    {
+      headers: patchHeaders(token),
+      timeout: 30000,
+      validateStatus: () => true,
+    }
+  );
+
+  // success: 204 No Content
+  if (!(res.status === 204 || (res.status >= 200 && res.status < 300))) {
+    throw new Error(extractMaximoError(res));
+  }
+}
+
+// 2) ✅ add actual labor: POST array to /labtrans (use same PATCH override headers)
+export async function addActualLabor(
+  woHref: string, // should be mxwoDetailsHref (sm_mxwodetails member href)
+  username: string,
+  password: string,
+  payload: {
+    laborcode: string;
+    regularhrs: number;
+  }
+): Promise<void> {
+  const token = makeToken(username, password);
+
+  const fixedHref = rewriteMaximoUrl(woHref) || woHref;
+  const url = `${fixedHref}/labtrans?lean=1`;
+
+  const res = await axios.post(
+    url,
+    [
+      {
+        laborcode: payload.laborcode,
+        regularhrs: payload.regularhrs,
+      },
+    ],
+    {
+      headers: patchHeaders(token),
+      timeout: 30000,
+      validateStatus: () => true,
+    }
+  );
+
+  if (!(res.status >= 200 && res.status < 300)) {
+    throw new Error(extractMaximoError(res));
+  }
+}
+
+// --------------------------
+// Work Order Details (base)
 // --------------------------
 interface MaximoWorkOrderItem {
   href?: string;
@@ -486,17 +575,11 @@ export async function getWorkOrderDetails(
 
     const item = res.data.member[0];
 
-    const loc =
-      typeof item.location === 'string' ? item.location : (item.location as any)?.location ?? '';
-
+    const loc = typeof item.location === 'string' ? item.location : (item.location as any)?.location ?? '';
     const locDesc = item.locationdescription ?? loc ?? '';
     const docLinksArr = normalizeDoclinks(item.doclinks);
 
-    const activitiesRaw = Array.isArray(item.woactivity)
-      ? item.woactivity
-      : item.woactivity
-      ? [item.woactivity]
-      : [];
+    const activitiesRaw = Array.isArray(item.woactivity) ? item.woactivity : item.woactivity ? [item.woactivity] : [];
 
     const wo: WorkOrder = {
       wonum: item.wonum ?? wonum,

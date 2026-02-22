@@ -33,12 +33,23 @@ const CATEGORIES = [
 
   { key: 'Matériel planifié', icon: 'package', gradient: ['#93c5fd', '#3b82f6'] },
   { key: 'Matériel réel', icon: 'clipboard', gradient: ['#005ed1', '#0ea5e9'] },
+
+  { key: 'Work log', icon: 'clock', gradient: ['#7c3aed', '#4f46e5'] },
 ];
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
+/**
+ * ✅ IMPORTANT FOR ACTUALS:
+ * Maximo POST for actual material/labor needs the sm_mxwodetails member href:
+ *   (details as any).mxwoDetailsHref
+ * NOT workorderid/siteid.
+ *
+ * So your WorkOrderDetailsViewModel should attach:
+ *   (details as any).mxwoDetailsHref = response.member[0].href from sm_mxwodetails
+ */
 export default function WorkOrderDetailsScreen({ route }: Props) {
   const woParam = (route as any)?.params?.workOrder;
   const navigation = useNavigation<NavProp>();
@@ -138,6 +149,9 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
     );
   }
 
+  // ✅ THIS is the href you must use for POST actual material/labor
+  const mxwoDetailsHref: string = String((details as any)?.mxwoDetailsHref || '').trim();
+
   const getCategoryCount = (category: string) => {
     switch (category) {
       case 'Activités':
@@ -149,7 +163,7 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
       case 'Matériel planifié':
         return details.materials?.length ?? 0;
 
-      // ✅ from sm_mxwodetails
+      // ✅ from sm_mxwodetails GET
       case "Main d'œuvre réelle":
         return (details as any).actualLabor?.length ?? 0;
 
@@ -159,8 +173,12 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
       case 'Documents':
         return (details as any).docLinks?.length ?? 0;
 
-      default:
-        return 0;
+      case 'Work log':
+      return (details as any).workLogs?.length ?? (details as any).worklog?.length ?? 0;
+
+    default:
+      return 0;
+  
     }
   };
 
@@ -300,6 +318,8 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
                     navigation.navigate('DetailsMaterials', { workOrder: details });
                   } else if (category.key === 'Matériel réel') {
                     navigation.navigate('DetailsActualMaterials', { workOrder: details });
+                  } else if (category.key === 'Work log') {
+                  navigation.navigate('DetailsWorkLog' as any, { workOrder: details });
                   }
                 }}
               >
@@ -335,7 +355,10 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
                             status: details.status,
                             ishistory: (details as any).ishistory,
                           });
-                        } else if (category.key === "Main d'œuvre planifiée") {
+                          return;
+                        }
+
+                        if (category.key === "Main d'œuvre planifiée") {
                           if (!details.workorderid || !details.siteid) {
                             Alert.alert('Erreur', 'workorderid / siteid manquant');
                             return;
@@ -344,25 +367,44 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
                             workorderid: details.workorderid,
                             siteid: details.siteid,
                           });
-                        } else if (category.key === 'Matériel réel') {
-                          if (!details.workorderid || !details.siteid) {
-                            Alert.alert('Erreur', 'workorderid / siteid manquant');
+                          return;
+                        }
+
+                        // ✅ ACTUAL MATERIAL (needs mxwoDetailsHref)
+                        if (category.key === 'Matériel réel') {
+                          if (!mxwoDetailsHref) {
+                            Alert.alert(
+                              'Erreur',
+                              'mxwoDetailsHref manquant (sm_mxwodetails href). Vérifie que le ViewModel le récupère.'
+                            );
                             return;
                           }
                           navigation.navigate('AddActualMaterial' as any, {
-                            workorderid: details.workorderid,
+                            wonum: details.wonum,
                             siteid: details.siteid,
+                            mxwoDetailsHref, // ✅ IMPORTANT
                           });
-                        } else if (category.key === "Main d'œuvre réelle") {
-                          if (!details.workorderid || !details.siteid) {
-                            Alert.alert('Erreur', 'workorderid / siteid manquant');
+                          return;
+                        }
+
+                        // ✅ ACTUAL LABOR (needs mxwoDetailsHref)
+                        if (category.key === "Main d'œuvre réelle") {
+                          if (!mxwoDetailsHref) {
+                            Alert.alert(
+                              'Erreur',
+                              'mxwoDetailsHref manquant (sm_mxwodetails href). Vérifie que le ViewModel le récupère.'
+                            );
                             return;
                           }
                           navigation.navigate('AddActualLabor' as any, {
-                            workorderid: details.workorderid,
+                            wonum: details.wonum,
                             siteid: details.siteid,
+                            mxwoDetailsHref, // ✅ IMPORTANT
                           });
-                        } else if (category.key === 'Documents') {
+                          return;
+                        }
+
+                        if (category.key === 'Documents') {
                           if (!details.workorderid || !details.siteid) {
                             Alert.alert('Erreur', 'workorderid / siteid manquant');
                             return;
@@ -371,6 +413,20 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
                             ownerid: details.workorderid,
                             siteid: details.siteid,
                           });
+                          return;
+                          
+                        }
+                        if (category.key === 'Work log') {
+                          const ref = String((details as any).worklog_collectionref || '').trim();
+                          if (!ref) {
+                            Alert.alert('Erreur', 'worklog_collectionref manquant');
+                            return;
+                          }
+                          navigation.navigate('AddWorkLog' as any, {
+                            worklogCollectionRef: ref,
+                            wonum: details.wonum,
+                          });
+                          return;
                         }
                       }}
                       style={styles.plusButton}
@@ -419,7 +475,14 @@ const styles = StyleSheet.create({
 
   header: { paddingBottom: 20, borderBottomLeftRadius: 24, borderBottomRightRadius: 24 },
   headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  backButton: { width: 44, height: 44, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  backButton: {
+    width: 44,
+    height: 44,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   headerTitle: { fontSize: 18, fontWeight: '700', color: '#fff' },
 
   woCard: { backgroundColor: 'rgba(255,255,255,0.98)', borderRadius: 10, padding: 10, marginBottom: 8 },
