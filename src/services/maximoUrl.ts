@@ -1,142 +1,134 @@
 // src/services/maximoUrl.ts
 import { MAXIMO } from '../config/maximoUrls';
 
+function safeTrim(v: any): string {
+  return typeof v === 'string' ? v.trim() : String(v ?? '').trim();
+}
+
+/** Collapse double slashes everywhere except protocol (http://) */
+function collapseAllSlashes(url: string) {
+  return safeTrim(url).replace(/([^:]\/)\/+/g, '$1');
+}
+
+/** Fix known typo domain (defensive) */
+function fixKnownHostTypos(url: string) {
+  return safeTrim(url).replace('demo2.smartech-ttn.com', 'demo2.smartech-tn.com');
+}
+
+function getOrigin(): string {
+  return fixKnownHostTypos(safeTrim(MAXIMO.ORIGIN)).replace(/\/+$/, '');
+}
+
+function normalizePath(p: string) {
+  let path = safeTrim(p).replace(/\/{2,}/g, '/');
+  path = path.replace(/\/maximo\/maximo\b/g, '/maximo');
+  path = path.replace(/\/oslc\/os\/os\b/g, '/oslc/os');
+  path = path.replace(/\/+$/, '');
+  if (!path.startsWith('/')) path = `/${path}`;
+  return path;
+}
+
 /**
- * Normalize ANY incoming href to your configured Maximo base:
- *   MAXIMO.ORIGIN = http://demo2.smartech-tn.com/maximo
- *
- * Handles cases like:
- * - http://demo2.../maximo/maximo/oslc/os//mxwo/...
- * - http://192.168...:9080/maximo/oslc/os/mxwo/...
- * - /maximo/oslc/os/mxwo/...
+ * Rewrite to MAXIMO.ORIGIN while keeping path+query
  */
 export function rewriteToMaximoOrigin(url: string): string {
-  const u = String(url || '').trim();
+  const u = fixKnownHostTypos(safeTrim(url));
   if (!u) return '';
 
-  // Make sure origin has no trailing slash
-  const origin = String(MAXIMO.ORIGIN || '').replace(/\/+$/, '');
+  const origin = getOrigin();
+  if (!origin) return u;
 
   try {
     const parsed = new URL(u);
 
-    // keep only pathname + search
-    let path = parsed.pathname.replace(/\/+/g, '/');
+    let path = normalizePath(parsed.pathname);
     const search = parsed.search || '';
+    const hash = parsed.hash || '';
 
-    // ✅ remove duplicate "/maximo/maximo"
-    path = path.replace(/\/maximo\/maximo\b/g, '/maximo');
-
-    // ✅ if pathname already starts with "/maximo/..." but origin already ends with "/maximo"
-    // then remove the first "/maximo" to avoid "/maximo/maximo"
+    // avoid origin "/maximo" + path "/maximo/.."
     if (origin.endsWith('/maximo') && path.startsWith('/maximo/')) {
       path = path.replace(/^\/maximo\b/, '');
       if (!path.startsWith('/')) path = `/${path}`;
     }
 
-    return `${origin}${path}${search}`.replace(/\/+$/, '');
+    return collapseAllSlashes(`${origin}${path}${search}${hash}`);
   } catch {
-    // relative url
-    let cleaned = u.startsWith('/') ? u : `/${u}`;
-    cleaned = cleaned.replace(/\/+/g, '/');
+    let path = u.startsWith('/') ? u : `/${u}`;
+    path = normalizePath(path);
 
-    // ✅ remove duplicate "/maximo/maximo"
-    cleaned = cleaned.replace(/\/maximo\/maximo\b/g, '/maximo');
-
-    // ✅ avoid origin "/maximo" + cleaned "/maximo/..."
-    if (origin.endsWith('/maximo') && cleaned.startsWith('/maximo/')) {
-      cleaned = cleaned.replace(/^\/maximo\b/, '');
-      if (!cleaned.startsWith('/')) cleaned = `/${cleaned}`;
+    if (origin.endsWith('/maximo') && path.startsWith('/maximo/')) {
+      path = path.replace(/^\/maximo\b/, '');
+      if (!path.startsWith('/')) path = `/${path}`;
     }
 
-    return `${origin}${cleaned}`.replace(/\/+$/, '');
+    return collapseAllSlashes(`${origin}${path}`);
   }
 }
 
 /**
- * Ensure the URL is under:
- *   {MAXIMO.ORIGIN}/oslc/os/...
- * and remove duplicate /maximo, duplicate /oslc/os, and double slashes.
+ * Force URL under: {MAXIMO.ORIGIN}/oslc/os/...
  */
 export function rewriteToMaximoOslcOs(url: string): string {
-  const u = String(url || '').trim();
+  const u = fixKnownHostTypos(safeTrim(url));
   if (!u) return '';
 
-  // Keep any query string
-  const [basePart, queryPart] = u.split('?');
-  const query = queryPart ? `?${queryPart}` : '';
+  const origin = getOrigin();
+  if (!origin) return u;
 
-  // Remove protocol+host if present
-  let path = basePart;
+  let pathname = '';
+  let search = '';
+  let hash = '';
 
   try {
-    const parsed = new URL(basePart);
-    path = parsed.pathname;
+    const parsed = new URL(u);
+    pathname = parsed.pathname || '';
+    search = parsed.search || '';
+    hash = parsed.hash || '';
   } catch {
-    // not absolute; keep as is
+    const hashIdx = u.indexOf('#');
+    const qIdx = u.indexOf('?');
+
+    if (hashIdx >= 0) hash = u.slice(hashIdx);
+    if (qIdx >= 0) search = u.slice(qIdx, hashIdx >= 0 ? hashIdx : undefined);
+
+    pathname = u.slice(0, qIdx >= 0 ? qIdx : hashIdx >= 0 ? hashIdx : u.length);
   }
 
-  // Normalize slashes
-  path = path.replace(/\/+/g, '/');
+  pathname = normalizePath(pathname);
 
-  // Remove duplicate "/maximo/maximo"
-  path = path.replace(/\/maximo\/maximo\b/g, '/maximo');
-
-  // If path already contains "/oslc/os", keep from there
-  const idx = path.indexOf('/oslc/os/');
-  if (idx >= 0) {
-    path = path.slice(idx); // starts at /oslc/os/...
-  } else {
-    // Sometimes server returns /maximo/oslc/os/... or even /oslc/...
-    const idx2 = path.indexOf('/oslc/');
-    if (idx2 >= 0) {
-      path = path.slice(idx2); // /oslc/...
-    }
+  // keep from /oslc/os if present
+  const idx = pathname.indexOf('/oslc/os/');
+  if (idx >= 0) pathname = pathname.slice(idx);
+  else {
+    const idx2 = pathname.indexOf('/oslc/');
+    if (idx2 >= 0) pathname = pathname.slice(idx2);
   }
 
-  // Now enforce /oslc/os prefix (not /oslc only)
-  if (path.startsWith('/oslc/') && !path.startsWith('/oslc/os/')) {
-    path = path.replace(/^\/oslc\//, '/oslc/os/');
+  // enforce /oslc/os
+  if (pathname.startsWith('/oslc/') && !pathname.startsWith('/oslc/os/')) {
+    pathname = pathname.replace(/^\/oslc\//, '/oslc/os/');
+  }
+  if (!pathname.startsWith('/oslc/os/')) {
+    pathname = `/oslc/os/${pathname.replace(/^\/+/, '')}`;
   }
 
-  // Final cleanup: avoid "/oslc/os/os/"
-  path = path.replace(/\/oslc\/os\/os\//g, '/oslc/os/');
+  pathname = normalizePath(pathname);
 
-  // Ensure it starts with /oslc/os
-  if (!path.startsWith('/oslc/os/')) {
-    path = `/oslc/os/${path.replace(/^\/+/, '')}`;
-  }
-
-  // Remove accidental "//"
-  path = path.replace(/\/+/g, '/');
-
-  // IMPORTANT: MAXIMO.ORIGIN already includes /maximo
-  const origin = String(MAXIMO.ORIGIN || '').replace(/\/+$/, '');
-  return `${origin}${path}${query}`.replace(/\/+$/, '');
+  return collapseAllSlashes(`${origin}${pathname}${search}${hash}`);
 }
 
 /**
- * Build the Work Order status action URL:
- * - if you need standard Maximo action: ?action=wostatus
- * - preserves existing query string if any
- */
-export function buildWoStatusActionUrl(woHref: string): string {
-  const fixed = rewriteToMaximoOslcOs(woHref);
-  if (!fixed) return '';
-
-  const hasQuery = fixed.includes('?');
-  return `${fixed}${hasQuery ? '&' : '?'}action=wostatus`;
-}
-
-/**
- * Build a generic wsmethod action URL:
+ * Postman-style wsmethod URL:
  * ?action=wsmethod:changeStatus&lean=1
  */
 export function buildWsMethodActionUrl(href: string, method: string, lean: 0 | 1 = 1): string {
   const fixed = rewriteToMaximoOslcOs(href);
   if (!fixed) return '';
 
-  const hasQuery = fixed.includes('?');
-  const m = encodeURIComponent(method);
-  return `${fixed}${hasQuery ? '&' : '?'}action=wsmethod:${m}&lean=${lean}`;
+  const mRaw = safeTrim(method);
+  const m = mRaw.startsWith('wsmethod:') ? mRaw.slice('wsmethod:'.length) : mRaw;
+  const actionValue = `wsmethod:${m}`;
+
+  const url = `${fixed}${fixed.includes('?') ? '&' : '?'}action=${actionValue}&lean=${lean}`;
+  return collapseAllSlashes(url);
 }

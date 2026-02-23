@@ -1,41 +1,62 @@
 // src/services/rewriteMaximoUrl.ts
 import { MAXIMO } from '../config/maximoUrls';
 
+function safeTrim(v: any): string {
+  return typeof v === 'string' ? v.trim() : String(v ?? '').trim();
+}
+
+function cleanPathOnly(pathname: string): string {
+  // IMPORTANT: ONLY fix known path issues. Never alter tokens/ids.
+  let p = pathname;
+
+  p = p.replace('/maxiimo/', '/maximo/');
+  p = p.replace('/maximo/maximo/', '/maximo/');
+  p = p.replace('/os//', '/os/');
+
+  // collapse duplicate slashes in path
+  p = p.replace(/\/{2,}/g, '/');
+
+  // remove trailing slash (not query)
+  if (p.length > 1) p = p.replace(/\/+$/, '');
+
+  return p;
+}
+
 /**
- * Rewrites any OSLC href returned by Maximo (often internal IP like 192.168.x.x)
- * to your configured MAXIMO base.
+ * Rewrite hrefs returned by Maximo:
+ * - Replace origin host/port with the configured one (from MAXIMO.OSLC_OS)
+ * - Fix common path typos (maxiimo, /os//, /maximo/maximo)
+ * - NEVER change the resource id segment (e.g. "_QkVERk9SRC8xNDI1")
  */
 export function rewriteMaximoUrl(input?: string): string {
-  const raw = String(input || '').trim();
+  const raw = safeTrim(input);
   if (!raw) return '';
 
-  // Example MAXIMO.OSLC_OS = "http://demo2.smartech-tn.com/maximo/oslc/os"
-  // We want origin like "http://demo2.smartech-tn.com/maximo"
-  const oslc = String(MAXIMO.OSLC_OS || '').trim();
+  const oslc = safeTrim(MAXIMO.OSLC_OS);
   if (!oslc) return raw;
 
-  // build base "http(s)://host[:port]/maximo"
-  let wantedBase = oslc;
-  const idx = oslc.indexOf('/oslc');
-  if (idx > -1) wantedBase = oslc.slice(0, idx);
-
+  let wantedOrigin = '';
   try {
-    // if input is absolute URL -> replace origin+path prefix with wantedBase
-    const u = new URL(raw);
-    const path = u.pathname + (u.search || '') + (u.hash || '');
-
-    // If href already uses correct base, keep it
-    if (raw.startsWith(wantedBase)) return raw;
-
-    // Convert:
-    //   http://192.168.1.202:9080/maximo/oslc/os/mxwo/_XXX
-    // to:
-    //   http://demo2.../maximo/oslc/os/mxwo/_XXX
-    return wantedBase.replace(/\/+$/, '') + path;
+    wantedOrigin = new URL(oslc).origin.replace('smartech--tn.com', 'smartech-tn.com');
   } catch {
-    // raw might be relative like "/maximo/oslc/os/..."
+    return raw;
+  }
+
+  // Absolute input
+  try {
+    const u = new URL(raw);
+
+    const pathname = cleanPathOnly(u.pathname);
+    // keep query and hash unchanged
+    const search = u.search || '';
+    const hash = u.hash || '';
+
+    return `${wantedOrigin}${pathname}${search}${hash}`;
+  } catch {
+    // Relative input
     if (raw.startsWith('/')) {
-      return wantedBase.replace(/\/+$/, '') + raw;
+      const pathname = cleanPathOnly(raw);
+      return `${wantedOrigin}${pathname}`;
     }
     return raw;
   }

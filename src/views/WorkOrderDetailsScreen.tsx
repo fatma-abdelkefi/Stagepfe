@@ -21,6 +21,8 @@ import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/AuthContext';
 import StatusChangeModal from '../components/StatusChangeModal';
 
+import { rewriteMaximoUrl } from '../services/rewriteMaximoUrl';
+
 type Props = { route: RouteProp<RootStackParamList, 'WorkOrderDetails'> };
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'WorkOrderDetails'>;
 
@@ -41,20 +43,55 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
+function safeTrim(v: any): string {
+  return typeof v === 'string' ? v.trim() : String(v ?? '').trim();
+}
+
+function upper(s?: string) {
+  return safeTrim(s).toUpperCase();
+}
+
+function isFinalStatus(status?: string) {
+  const s = upper(status);
+  return s === 'COMP' || s === 'CLOSE' || s === 'CAN' || s === 'CANC';
+}
+
 /**
- * ✅ IMPORTANT FOR ACTUALS:
- * Maximo POST for actual material/labor needs the sm_mxwodetails member href:
- *   (details as any).mxwoDetailsHref
- * NOT workorderid/siteid.
- *
- * So your WorkOrderDetailsViewModel should attach:
- *   (details as any).mxwoDetailsHref = response.member[0].href from sm_mxwodetails
+ * Normalize href to prevent 404:
+ * - fixes "/maxiimo/" typo
+ * - fixes "/maximo/maximo/" duplication
+ * - rewrites internal IPs to demo host (rewriteMaximoUrl)
+ * - removes trailing slashes
  */
+function normalizeHref(href: any): string {
+  let u = safeTrim(href);
+  if (!u) return '';
+
+  u = u.replace('/maxiimo/', '/maximo/');
+  u = u.replace('/maximo/maximo/', '/maximo/');
+
+  u = rewriteMaximoUrl(u);
+  u = u.replace(/\/+$/, '');
+
+  return u;
+}
+
 export default function WorkOrderDetailsScreen({ route }: Props) {
   const woParam = (route as any)?.params?.workOrder;
   const navigation = useNavigation<NavProp>();
   const { width } = useWindowDimensions();
 
+  const { username, password, authLoading } = useAuth();
+  const { workOrder: details, loading, error, refresh } = useWorkOrderDetails(woParam?.wonum ?? '');
+
+  // ✅ keep both code + french label
+  const [statusModalVisible, setStatusModalVisible] = useState(false);
+  const [currentStatus, setCurrentStatus] = useState(woParam?.status ?? '');
+  const [currentStatusLabel, setCurrentStatusLabel] = useState(
+    safeTrim((woParam as any)?.status_description) || woParam?.status || ''
+  );
+
+  // ✅ layout memo
   const layout = useMemo(() => {
     const sidePadding = clamp(Math.round(width * 0.05), 14, 24);
     const gap = clamp(Math.round(width * 0.04), 12, 18);
@@ -67,19 +104,34 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
     return { sidePadding, gap, columns, cardWidth, cardHeight };
   }, [width]);
 
-  const { username, password, authLoading } = useAuth();
-  const { workOrder: details, loading, error, refresh } = useWorkOrderDetails(woParam?.wonum ?? '');
+  // ✅ derived values (safe even when details is null)
+  const statusLocked = useMemo(() => isFinalStatus(details?.status), [details?.status]);
 
-  const [statusModalVisible, setStatusModalVisible] = useState(false);
-  const [currentStatus, setCurrentStatus] = useState(woParam?.status ?? '');
-  const [currentStatusLabel, setCurrentStatusLabel] = useState(woParam?.status ?? '');
+  const mxwoDetailsHref = useMemo(() => safeTrim((details as any)?.mxwoDetailsHref || ''), [details]);
 
+  const rawHref = useMemo(() => safeTrim((details as any)?.href ?? ''), [details]);
+  const cleanWoHref = useMemo(() => normalizeHref(rawHref), [rawHref]);
+
+  // ✅ IMPORTANT: all hooks above any early return (fixes "Rendered more hooks...")
   useEffect(() => {
     if (details?.status) {
+      const labelFromApi =
+        safeTrim((details as any)?.status_description) ||
+        safeTrim((details as any)?.statusDescription) ||
+        '';
+
+      console.log('[UI][STATUS] details.status changed =>', details.status, 'label=', labelFromApi);
+
       setCurrentStatus(details.status);
-      setCurrentStatusLabel(details.status);
+      setCurrentStatusLabel(labelFromApi || details.status);
     }
-  }, [details?.status]);
+  }, [details?.status, (details as any)?.status_description, (details as any)?.statusDescription]);
+
+  useEffect(() => {
+    // debug only, but must stay here (before returns) to avoid hooks mismatch
+    if (!rawHref && !cleanWoHref) return;
+    console.log('[UI][STATUS] href debug', { rawHref, cleanWoHref });
+  }, [rawHref, cleanWoHref]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -96,6 +148,52 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
     }, [authLoading, refresh, woParam?.wonum])
   );
 
+  const getCategoryCount = useCallback(
+    (category: string) => {
+      if (!details) return 0;
+      switch (category) {
+        case 'Activités':
+          return details.activities?.length ?? 0;
+        case "Main d'œuvre planifiée":
+          return details.labor?.length ?? 0;
+        case 'Matériel planifié':
+          return details.materials?.length ?? 0;
+        case "Main d'œuvre réelle":
+          return (details as any).actualLabor?.length ?? 0;
+        case 'Matériel réel':
+          return (details as any).actualMaterials?.length ?? 0;
+        case 'Documents':
+          return (details as any).docLinks?.length ?? 0;
+        case 'Work log':
+          return (details as any).workLogs?.length ?? (details as any).worklog?.length ?? 0;
+        default:
+          return 0;
+      }
+    },
+    [details]
+  );
+
+  const onPressStatus = useCallback(() => {
+    console.log('[UI][STATUS] press status button', {
+      current: currentStatus,
+      currentLabel: currentStatusLabel,
+      locked: statusLocked,
+      detailsStatus: details?.status,
+      hrefRaw: rawHref,
+      hrefClean: cleanWoHref,
+    });
+
+    if (statusLocked) return;
+
+    if (!cleanWoHref) {
+      Alert.alert('Erreur', 'href manquant / invalide (impossible de changer le statut)');
+      return;
+    }
+
+    setStatusModalVisible(true);
+  }, [currentStatus, currentStatusLabel, statusLocked, details?.status, rawHref, cleanWoHref]);
+
+  // ✅ now safe to early-return (all hooks already called)
   if (!woParam?.wonum) {
     return (
       <SafeAreaView style={styles.container}>
@@ -149,39 +247,6 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
     );
   }
 
-  // ✅ THIS is the href you must use for POST actual material/labor
-  const mxwoDetailsHref: string = String((details as any)?.mxwoDetailsHref || '').trim();
-
-  const getCategoryCount = (category: string) => {
-    switch (category) {
-      case 'Activités':
-        return details.activities?.length ?? 0;
-
-      case "Main d'œuvre planifiée":
-        return details.labor?.length ?? 0;
-
-      case 'Matériel planifié':
-        return details.materials?.length ?? 0;
-
-      // ✅ from sm_mxwodetails GET
-      case "Main d'œuvre réelle":
-        return (details as any).actualLabor?.length ?? 0;
-
-      case 'Matériel réel':
-        return (details as any).actualMaterials?.length ?? 0;
-
-      case 'Documents':
-        return (details as any).docLinks?.length ?? 0;
-
-      case 'Work log':
-      return (details as any).workLogs?.length ?? (details as any).worklog?.length ?? 0;
-
-    default:
-      return 0;
-  
-    }
-  };
-
   return (
     <SafeAreaView style={styles.container}>
       <LinearGradient
@@ -223,21 +288,18 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
                 </View>
               )}
 
-              <TouchableOpacity
-                onPress={() => {
-                  if (!(details as any)?.href) {
-                    Alert.alert('Erreur', 'href manquant (impossible de changer le statut)');
-                    return;
-                  }
-                  setStatusModalVisible(true);
-                }}
-                style={styles.statusChangeBtn}
-                activeOpacity={0.8}
-              >
-                <FeatherIcon name="refresh-cw" size={13} color="#2563eb" />
-                <Text style={styles.statusChangeBtnText}>{currentStatusLabel || currentStatus || '-'}</Text>
-                <FeatherIcon name="chevron-down" size={13} color="#2563eb" />
-              </TouchableOpacity>
+              {statusLocked ? (
+                <View style={styles.statusReadOnly}>
+                  <FeatherIcon name="lock" size={13} color="#2563eb" />
+                  <Text style={styles.statusReadOnlyText}>{currentStatusLabel || currentStatus || '-'}</Text>
+                </View>
+              ) : (
+                <TouchableOpacity onPress={onPressStatus} style={styles.statusChangeBtn} activeOpacity={0.8}>
+                  <FeatherIcon name="refresh-cw" size={13} color="#2563eb" />
+                  <Text style={styles.statusChangeBtnText}>{currentStatusLabel || currentStatus || '-'}</Text>
+                  <FeatherIcon name="chevron-down" size={13} color="#2563eb" />
+                </TouchableOpacity>
+              )}
             </View>
           </View>
 
@@ -319,7 +381,7 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
                   } else if (category.key === 'Matériel réel') {
                     navigation.navigate('DetailsActualMaterials', { workOrder: details });
                   } else if (category.key === 'Work log') {
-                  navigation.navigate('DetailsWorkLog' as any, { workOrder: details });
+                    navigation.navigate('DetailsWorkLog' as any, { workOrder: details });
                   }
                 }}
               >
@@ -370,7 +432,6 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
                           return;
                         }
 
-                        // ✅ ACTUAL MATERIAL (needs mxwoDetailsHref)
                         if (category.key === 'Matériel réel') {
                           if (!mxwoDetailsHref) {
                             Alert.alert(
@@ -382,12 +443,11 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
                           navigation.navigate('AddActualMaterial' as any, {
                             wonum: details.wonum,
                             siteid: details.siteid,
-                            mxwoDetailsHref, // ✅ IMPORTANT
+                            mxwoDetailsHref,
                           });
                           return;
                         }
 
-                        // ✅ ACTUAL LABOR (needs mxwoDetailsHref)
                         if (category.key === "Main d'œuvre réelle") {
                           if (!mxwoDetailsHref) {
                             Alert.alert(
@@ -399,7 +459,7 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
                           navigation.navigate('AddActualLabor' as any, {
                             wonum: details.wonum,
                             siteid: details.siteid,
-                            mxwoDetailsHref, // ✅ IMPORTANT
+                            mxwoDetailsHref,
                           });
                           return;
                         }
@@ -414,10 +474,10 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
                             siteid: details.siteid,
                           });
                           return;
-                          
                         }
+
                         if (category.key === 'Work log') {
-                          const ref = String((details as any).worklog_collectionref || '').trim();
+                          const ref = safeTrim((details as any).worklog_collectionref || '');
                           if (!ref) {
                             Alert.alert('Erreur', 'worklog_collectionref manquant');
                             return;
@@ -442,20 +502,23 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
         </View>
       </ScrollView>
 
-      <StatusChangeModal
-        visible={statusModalVisible}
-        entityType="WO"
-        currentStatus={currentStatus}
-        href={(details as any).href ?? ''}
-        username={username || ''}
-        password={password || ''}
-        onClose={() => setStatusModalVisible(false)}
-        onSuccess={async ({ code, label }) => {
-          setCurrentStatus(code);
-          setCurrentStatusLabel(label || code);
-          setTimeout(() => refresh(), 300);
-        }}
-      />
+            <StatusChangeModal
+              visible={statusModalVisible}
+              entityType="WO"
+              currentStatus={currentStatus}
+              locked={statusLocked}
+              wonum={details.wonum}
+              siteid={details.siteid}
+              href={cleanWoHref} // optional, ok to keep
+              username={username || ''}
+              password={password || ''}
+              onClose={() => setStatusModalVisible(false)}
+              onSuccess={async ({ code, label }) => {
+                setCurrentStatus(code);
+                setCurrentStatusLabel(label || code);
+                setTimeout(() => refresh(), 300);
+              }}
+            />
     </SafeAreaView>
   );
 }
@@ -494,8 +557,31 @@ const styles = StyleSheet.create({
   statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12 },
   statusBadgeText: { fontSize: 12, fontWeight: '700' },
 
-  statusChangeBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#eff6ff', borderWidth: 1.5, borderColor: '#3b82f6', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12 },
+  statusChangeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#eff6ff',
+    borderWidth: 1.5,
+    borderColor: '#3b82f6',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
   statusChangeBtnText: { fontSize: 12, fontWeight: '700', color: '#2563eb' },
+
+  statusReadOnly: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.8)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(59,130,246,0.6)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  statusReadOnlyText: { fontSize: 12, fontWeight: '800', color: '#2563eb' },
 
   description: { fontSize: 15, fontWeight: '500', color: '#0f172a', lineHeight: 22, marginBottom: 16 },
 
@@ -511,10 +597,37 @@ const styles = StyleSheet.create({
   categoryCard: { borderRadius: 20, overflow: 'hidden' },
   categoryGradient: { flex: 1, padding: 20, justifyContent: 'flex-start', position: 'relative' },
 
-  plusButton: { position: 'absolute', bottom: 16, right: 16, width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.3)', alignItems: 'center', justifyContent: 'center' },
-  categoryIconContainer: { width: 56, height: 56, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
+  plusButton: {
+    position: 'absolute',
+    bottom: 16,
+    right: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  categoryIconContainer: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   categoryName: { fontSize: 16, fontWeight: '700', color: '#fff', marginTop: 12 },
 
-  categoryCount: { position: 'absolute', top: 16, right: 16, backgroundColor: 'rgba(255,255,255,0.3)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, minWidth: 32, alignItems: 'center' },
+  categoryCount: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    minWidth: 32,
+    alignItems: 'center',
+  },
   categoryCountText: { fontSize: 14, fontWeight: '800', color: '#fff' },
 });

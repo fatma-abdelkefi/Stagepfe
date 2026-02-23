@@ -46,27 +46,54 @@ type NavigationProp = NativeStackNavigationProp<
 function getHref(activity: Activity | null | undefined): string {
   if (!activity) return '';
   const h = activity.href;
-
   if (typeof h === 'string') return h.trim();
   if (h && typeof h === 'object' && typeof h.href === 'string') return h.href.trim();
   if (typeof activity._href === 'string') return activity._href.trim();
   return '';
 }
 
+// NEW: Convert Maximo UI hash-link (#...) → OSLC REST endpoint for activities
+function convertUiHashToOslcActivityHref(hashUrl: string): string {
+  const trimmed = (hashUrl || '').trim();
+  if (!trimmed) return '';
+
+  if (!trimmed.includes('#')) {
+    // already looks like a REST url
+    return trimmed;
+  }
+
+  const [base] = trimmed.split('#');
+  const fragment = trimmed.split('#')[1] || '';
+
+  if (!fragment) return trimmed;
+
+  // Typical fragment: V09SS09SREVSL1dPQUNUSVZJVFkvQkVERk9SRC9UMTA4NQ--
+  // We assume it's base64-like encoding of path parts
+  // Most reliable → just append to known activity OSLC pattern
+  // Adjust "mxactivity" or object structure name if your environment uses different name
+
+  const baseUrl = base.endsWith('/') ? base : `${base}/`;
+  const oslcPath = `maximo/oslc/os/mxactivity/${fragment}`;
+
+  return `${baseUrl}${oslcPath}`;
+}
+
 function labelFR(code?: string): string {
-  const c = String(code || '').trim();
-  return FR_BY_CODE[c] || c || '-';
+  const c = String(code ?? '').trim().toUpperCase();
+  if (!c) return '-';
+  return FR_BY_CODE[c] || c;
 }
 
 export default function DetailsActivitiesScreen({ route }: Props) {
   const navigation = useNavigation<NavigationProp>();
-  const { workOrder } = route.params;
   const { username, password } = useAuth();
 
-  const [activities, setActivities] = useState<Activity[]>(
-    (workOrder?.activities ?? []) as Activity[]
-  );
+  const workOrder = route?.params?.workOrder ?? null;
+  const rawActivities: Activity[] = Array.isArray(workOrder?.activities)
+    ? (workOrder.activities as Activity[])
+    : [];
 
+  const [activities, setActivities] = useState<Activity[]>(rawActivities);
   const [statusModalVisible, setStatusModalVisible] = useState(false);
   const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
   const [opening, setOpening] = useState(false);
@@ -76,26 +103,57 @@ export default function DetailsActivitiesScreen({ route }: Props) {
     return `${n} activité${n !== 1 ? 's' : ''}`;
   }, [activities.length]);
 
-  const openChangeStatus = async (activity: Activity) => {
+  const openChangeStatus = (activity: Activity) => {
     if (!username || !password) {
       Alert.alert('Erreur', 'Identifiants manquants');
       return;
     }
 
-    const href = getHref(activity);
-    if (!href) {
+    const rawHref = getHref(activity);
+    if (!rawHref) {
       Alert.alert('Erreur', "href manquant pour cette activité");
       return;
     }
 
-    setOpening(true);
-    setSelectedActivity(activity);
+    // Convert UI hash → OSLC href
+    const oslcHref = convertUiHashToOslcActivityHref(rawHref);
+
+    if (!oslcHref.includes('/mxactivity/')) {
+      console.warn('Possibly incorrect OSLC href generated:', oslcHref);
+    }
+
+    setSelectedActivity({ ...activity, href: oslcHref }); // store converted version
     setStatusModalVisible(true);
-    setOpening(false);
   };
 
-  const selectedHref = getHref(selectedActivity);
-  const selectedStatus = String(selectedActivity?.status ?? selectedActivity?.statut ?? '').trim();
+  const selectedHref = getHref(selectedActivity); // now contains converted OSLC href
+  const selectedStatus = String(
+    selectedActivity?.status ?? selectedActivity?.statut ?? ''
+  ).trim().toUpperCase();
+
+  if (!workOrder) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            style={styles.backButton}
+            activeOpacity={0.9}
+          >
+            <AppIcon name={Icons.back} size={24} color="#fff" />
+          </TouchableOpacity>
+          <AppText style={styles.headerTitle}>Activités</AppText>
+          <View style={{ width: 44 }} />
+        </View>
+        <View style={styles.emptyContainer}>
+          <AppIcon name={Icons.inbox} size={64} color="#cbd5e1" />
+          <AppText style={styles.emptyText}>
+            Données de l'ordre de travail manquantes.
+          </AppText>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -107,8 +165,9 @@ export default function DetailsActivitiesScreen({ route }: Props) {
         >
           <AppIcon name={Icons.back} size={24} color="#fff" />
         </TouchableOpacity>
-
-        <AppText style={styles.headerTitle}>Activités - #{workOrder?.wonum}</AppText>
+        <AppText style={styles.headerTitle}>
+          Activités - #{workOrder.wonum ?? 'N/A'}
+        </AppText>
         <View style={{ width: 44 }} />
       </View>
 
@@ -125,11 +184,12 @@ export default function DetailsActivitiesScreen({ route }: Props) {
             <AppText style={styles.sectionInfo}>{countText}</AppText>
 
             {activities.map((item: Activity, index: number) => {
-              const statusCode = String(item?.status ?? item?.statut ?? '').trim();
+              const statusCode = String(item?.status ?? item?.statut ?? '').trim().toUpperCase();
               const statusLabel = labelFR(statusCode);
+              const taskKey = `${item?.taskid ?? 'na'}_${index}`;
 
               return (
-                <View key={`${item.taskid ?? 'na'}_${index}`} style={styles.itemCard}>
+                <View key={taskKey} style={styles.itemCard}>
                   <View style={styles.itemHeader}>
                     <View style={styles.iconContainer}>
                       <AppIcon name={Icons.checkCircle} size={24} color="#3b82f6" />
@@ -137,15 +197,18 @@ export default function DetailsActivitiesScreen({ route }: Props) {
 
                     <View style={{ flex: 1 }}>
                       <AppText style={styles.title}>
-                        Activité {item.taskid || 'N/A'}
+                        Activité {item?.taskid ?? 'N/A'}
                       </AppText>
 
-                      {!!item.labhrs && (
-                        <AppText style={styles.subtitle}>Durée : {item.labhrs} h</AppText>
+                      {!!item?.labhrs && (
+                        <AppText style={styles.subtitle}>
+                          Durée : {item.labhrs} h
+                        </AppText>
                       )}
 
                       <AppText style={styles.statusLine}>
-                        Statut : <AppText style={styles.statusValue}>{statusLabel}</AppText>
+                        Statut :{' '}
+                        <AppText style={styles.statusValue}>{statusLabel}</AppText>
                       </AppText>
                     </View>
 
@@ -155,7 +218,8 @@ export default function DetailsActivitiesScreen({ route }: Props) {
                       activeOpacity={0.85}
                       disabled={opening}
                     >
-                      {opening && selectedActivity?.taskid === item?.taskid ? (
+                      {opening &&
+                      String(selectedActivity?.taskid) === String(item?.taskid) ? (
                         <ActivityIndicator size="small" color="#fff" />
                       ) : (
                         <AppText style={styles.changeBtnText}>Changer</AppText>
@@ -164,7 +228,7 @@ export default function DetailsActivitiesScreen({ route }: Props) {
                   </View>
 
                   <AppText style={styles.description}>
-                    {item.description || 'Aucune description'}
+                    {item?.description || 'Aucune description'}
                   </AppText>
                 </View>
               );
@@ -173,19 +237,17 @@ export default function DetailsActivitiesScreen({ route }: Props) {
         )}
       </ScrollView>
 
-      {/* ✅ ALWAYS render modal (no conditional mount) */}
       <StatusChangeModal
         visible={statusModalVisible}
         entityType="ACTIVITY"
         currentStatus={selectedStatus}
-        href={selectedHref}                 // ✅ empty string when null -> safe
+        href={selectedHref}                    // ← now the converted OSLC href
         username={username || ''}
         password={password || ''}
         activityDomainId={DEFAULT_ACTIVITY_DOMAIN_ID}
         onClose={() => setStatusModalVisible(false)}
         onSuccess={({ code }) => {
           if (!selectedActivity) return;
-
           setActivities((prev) =>
             prev.map((a) =>
               String(a?.taskid) === String(selectedActivity?.taskid)
@@ -194,6 +256,7 @@ export default function DetailsActivitiesScreen({ route }: Props) {
             )
           );
           Alert.alert('Succès', `Statut activité changé vers : ${labelFR(code)}`);
+          setStatusModalVisible(false);
         }}
       />
     </SafeAreaView>
@@ -272,6 +335,17 @@ const styles = StyleSheet.create({
   },
   changeBtnText: { color: '#fff', fontWeight: '900', fontSize: 12 },
   description: { fontSize: 15, color: '#334155', lineHeight: 22 },
-  emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 120 },
-  emptyText: { marginTop: 16, fontSize: 16, fontWeight: '600', color: '#94a3b8', textAlign: 'center' },
+  emptyContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 120,
+  },
+  emptyText: {
+    marginTop: 16,
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#94a3b8',
+    textAlign: 'center',
+  },
 });

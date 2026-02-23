@@ -20,15 +20,24 @@ import {
   getActivityStatusListFR,
   DEFAULT_ACTIVITY_DOMAIN_ID,
   StatusFR,
+  normalizeMaximoHref,
 } from '../services/statusService';
 
 type Props = {
   visible: boolean;
   entityType: 'WO' | 'ACTIVITY';
-  currentStatus: string;
+
+  currentStatus: string; // code (WAPPR, INPRG, ...)
   href: string;
+
+  // ✅ optional context if you want later
+  wonum?: string;
+  siteid?: string;
+
   username: string;
   password: string;
+
+  locked?: boolean;
 
   onClose: () => void;
   onSuccess: (x: { code: string; label: string }) => void;
@@ -36,8 +45,15 @@ type Props = {
   activityDomainId?: string;
 };
 
+function safeTrim(v: any): string {
+  return typeof v === 'string' ? v.trim() : String(v ?? '').trim();
+}
 function upper(s?: string) {
-  return String(s || '').trim().toUpperCase();
+  return safeTrim(s).toUpperCase();
+}
+function isFinalStatus(status?: string) {
+  const s = upper(status);
+  return s === 'COMP' || s === 'CLOSE' || s === 'CAN' || s === 'CANC';
 }
 
 export default function StatusChangeModal({
@@ -45,8 +61,11 @@ export default function StatusChangeModal({
   entityType,
   currentStatus,
   href,
+  wonum,
+  siteid,
   username,
   password,
+  locked,
   onClose,
   onSuccess,
   activityDomainId,
@@ -55,14 +74,27 @@ export default function StatusChangeModal({
   const [submitting, setSubmitting] = useState(false);
   const [list, setList] = useState<StatusFR[]>([]);
 
-  // load statuses when modal opens
+  // Load status list in FR
   useEffect(() => {
     if (!visible) return;
     if (!username || !password) return;
 
+    const cleanHref = normalizeMaximoHref(href);
+    console.log('[MODAL][STATUS] open', {
+      entityType,
+      currentStatus,
+      locked: !!locked,
+      wonum,
+      siteid,
+      href,
+      hrefClean: cleanHref,
+      activityDomainId,
+    });
+
     (async () => {
       try {
         setLoadingList(true);
+
         const res =
           entityType === 'ACTIVITY'
             ? await getActivityStatusListFR(username, password, activityDomainId || DEFAULT_ACTIVITY_DOMAIN_ID)
@@ -75,25 +107,44 @@ export default function StatusChangeModal({
         setLoadingList(false);
       }
     })();
-  }, [visible, entityType, username, password, activityDomainId]);
+  }, [visible, entityType, username, password, activityDomainId, href, currentStatus, locked, wonum, siteid]);
+
+  const currentLabel = useMemo(() => {
+    const cur = upper(currentStatus);
+    const found = list.find((x) => upper(x.code) === cur) || list.find((x) => upper(x.value) === cur);
+    return found?.libelle || '';
+  }, [list, currentStatus]);
 
   const options = useMemo(() => {
     const cur = upper(currentStatus);
     return list.map((s) => ({
       ...s,
-      isCurrent: upper(s.value) === cur || upper(s.code) === cur, // current could be synonym
+      isCurrent: upper(s.value) === cur || upper(s.code) === cur,
     }));
   }, [list, currentStatus]);
 
   const handlePick = async (item: StatusFR) => {
     if (submitting) return;
 
+    console.log('[MODAL][STATUS] pick', {
+      libelle: item.libelle,
+      code: item.code,
+      value: item.value,
+      current: currentStatus,
+      locked: !!locked,
+    });
+
+    if (locked || isFinalStatus(currentStatus)) {
+      Alert.alert('Statut verrouillé', `Impossible de changer le statut (${upper(currentStatus)}).`);
+      return;
+    }
+
     if (!username || !password) {
       Alert.alert('Erreur', 'Identifiants manquants');
       return;
     }
 
-    const cleanHref = String(href || '').trim();
+    const cleanHref = normalizeMaximoHref(href);
     if (!cleanHref) {
       Alert.alert('Erreur', 'href manquant');
       return;
@@ -101,24 +152,25 @@ export default function StatusChangeModal({
 
     setSubmitting(true);
     try {
-      // ✅ send synonym value to Maximo
+      // ✅ VERY IMPORTANT: send synonym VALUE (item.value), not code
       await changeStatusByHref(cleanHref, item.value, username, password, {
         memo: 'Changement via mobile',
       });
 
-      // ✅ verify from backend
+      // ✅ verify
       const confirmed = await fetchStatusByHref(cleanHref, username, password);
-      if (!confirmed) throw new Error("Impossible de vérifier le statut après changement.");
-
-      if (upper(confirmed) !== upper(item.value)) {
-        throw new Error(
-          `Maximo n’a pas appliqué le statut demandé (actuel: ${confirmed}).`
-        );
-      }
+      if (!confirmed?.status) throw new Error("Impossible de vérifier le statut après changement.");
 
       onClose();
-      onSuccess({ code: confirmed, label: item.libelle || confirmed });
+
+      // label in FR:
+      const newLabel =
+        (list.find((x) => upper(x.value) === upper(confirmed.status)) ||
+          list.find((x) => upper(x.code) === upper(confirmed.status)))?.libelle || item.libelle || confirmed.status;
+
+      onSuccess({ code: confirmed.status, label: newLabel });
     } catch (e: any) {
+      console.log('[MODAL][STATUS] change error=', e?.message || e);
       Alert.alert('Statut non changé', e?.message || 'Échec changement statut');
     } finally {
       setSubmitting(false);
@@ -130,22 +182,20 @@ export default function StatusChangeModal({
       <View style={styles.overlay}>
         <View style={styles.card}>
           <View style={styles.header}>
-            <Text style={styles.title}>
-              Changer le statut {entityType === 'ACTIVITY' ? "d'activité" : 'OT'}
-            </Text>
+            <Text style={styles.title}>Changer le statut {entityType === 'ACTIVITY' ? "d'activité" : 'OT'}</Text>
             <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
               <FeatherIcon name="x" size={18} color="#0f172a" />
             </TouchableOpacity>
           </View>
 
-          <Text style={styles.subtitle}>Statut actuel: {upper(currentStatus) || '-'}</Text>
+          <Text style={styles.subtitle}>
+            Statut actuel: {currentLabel ? `${currentLabel} (${upper(currentStatus)})` : upper(currentStatus) || '-'}
+          </Text>
 
           {loadingList ? (
             <View style={{ paddingVertical: 18, alignItems: 'center' }}>
               <ActivityIndicator size="small" color="#3b82f6" />
-              <Text style={{ marginTop: 10, fontWeight: '600', color: '#475569' }}>
-                Chargement des statuts...
-              </Text>
+              <Text style={{ marginTop: 10, fontWeight: '600', color: '#475569' }}>Chargement des statuts...</Text>
             </View>
           ) : (
             <FlatList
@@ -153,17 +203,13 @@ export default function StatusChangeModal({
               keyExtractor={(item) => item.key}
               renderItem={({ item }) => (
                 <TouchableOpacity
-                  disabled={submitting}
+                  disabled={submitting || !!locked}
                   onPress={() => handlePick(item)}
                   style={[styles.row, item.isCurrent && styles.rowActive]}
                 >
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.rowTitle, item.isCurrent && styles.rowTitleActive]}>
-                      {item.libelle}
-                    </Text>
-                    <Text style={styles.rowCode}>
-                      code: {item.code}  •  value: {item.value}
-                    </Text>
+                    <Text style={[styles.rowTitle, item.isCurrent && styles.rowTitleActive]}>{item.libelle}</Text>
+                    <Text style={styles.rowCode}>code: {item.code} • value: {item.value}</Text>
                   </View>
 
                   {item.isCurrent ? (
@@ -186,17 +232,8 @@ export default function StatusChangeModal({
             </View>
           )}
 
-          <TouchableOpacity
-            disabled={submitting}
-            onPress={onClose}
-            style={{ borderRadius: 12, overflow: 'hidden' }}
-          >
-            <LinearGradient
-              colors={['#e2e8f0', '#cbd5e1']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.cancelBtn}
-            >
+          <TouchableOpacity disabled={submitting} onPress={onClose} style={{ borderRadius: 12, overflow: 'hidden' }}>
+            <LinearGradient colors={['#e2e8f0', '#cbd5e1']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.cancelBtn}>
               <Text style={styles.cancelText}>Fermer</Text>
             </LinearGradient>
           </TouchableOpacity>
