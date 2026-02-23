@@ -5,32 +5,49 @@ import { rewriteMaximoUrl } from './rewriteMaximoUrl';
 
 export type StatusFR = {
   key: string;
-  libelle: string; // FR label (description)
-  code: string;    // maxvalue (canonical)
-  value: string;   // synonym value (what you must send to change status)
+  libelle: string;
+  code: string;
+  value: string;
 };
 
 export const DEFAULT_WO_DOMAIN_ID = '_V09TVEFUVVM-';
 export const DEFAULT_ACTIVITY_DOMAIN_ID = '_V09TVEFUVVM-';
 
-/**
- * Static FR label fallback map (code → label).
- * Populated at runtime by getStatusListFR / getWorkOrderStatusListFR.
- * Used by screens that need a synchronous label lookup without an async call.
- */
 export const FR_BY_CODE: Record<string, string> = {
-  // Work Order statuses (common Maximo defaults)
-  WAPPR:  'Waiting on approval',
-  APPR:   'Approved',
-  INPRG:  'In progress',
-  WMATL:  'Waiting on material',
-  WPCOND: 'Waiting on plant cond',
-  COMP:   'Completed',
-  CLOSE:  'Closed',
-  CAN:    'Canceled',
-  CANC:   'Canceled',
-  WSCH:   'Waiting to be scheduled',
-  WSCHED: 'Waiting to be scheduled',
+  WAPPR:    'En attente d\'approbation',
+  APPR:     'Approuvé',
+  INPRG:    'En cours',
+  WMATL:    'En attente de matériel',
+  WPCOND:   'En attente condition usine',
+  COMP:     'Terminé',
+  CLOSE:    'Clôturé',
+  CAN:      'Annulé',
+  CANC:     'Annulé',
+  WSCH:     'En attente de planification',
+  WSCHED:   'En attente de planification',
+  HISTEDIT: 'Modifié dans l\'historique',
+};
+
+/**
+ * French label override map keyed by SYNONYM VALUE (what Maximo returns in `value`).
+ * Applied after fetching from Maximo's domain API to replace English descriptions.
+ * Add any missing statuses here.
+ */
+const FR_LABEL_BY_VALUE: Record<string, string> = {
+  // Standard WO statuses
+  WAPPR:    'En attente d\'approbation',
+  APPR:     'Approuvé',
+  INPRG:    'En cours',
+  WMATL:    'En attente de matériel',
+  WPCOND:   'En attente condition usine',
+  COMP:     'Terminé',
+  CLOSE:    'Clôturé',
+  CAN:      'Annulé',
+  CANC:     'Annulé',
+  WSCH:     'En attente de planification',
+  WSCHED:   'En attente de planification',
+  HISTEDIT: 'Modifié dans l\'historique',
+  // Add more here as you discover new ones in your Maximo domain
 };
 
 type MaximoErrorShape = {
@@ -91,34 +108,55 @@ function extractMaximoError(data: any): string {
   );
 }
 
+function oslcLiteral(v: any): string {
+  const s = safeTrim(v);
+  if (!s) return '""';
+  const n = Number(s);
+  if (!Number.isNaN(n) && /^-?\d+(\.\d+)?$/.test(s)) return String(n);
+  return `"${s.replace(/"/g, '\\"')}"`;
+}
+
+/**
+ * Returns true if the href is a Maximo internal child key reference.
+ * These look like "http://childkey#BASE64" and are NOT real HTTP endpoints.
+ * Never pass them to normalizeMaximoHref or any HTTP call.
+ */
+function isChildKeyHref(href: string): boolean {
+  return href.startsWith('http://childkey') || href.startsWith('childkey');
+}
+
 /**
  * Normalize a Maximo href — fixes all known corruption patterns.
  *
- * Key fix: collapse any double-slash in the URL PATH (but not in "http://")
- * This prevents the base64 resource key from being corrupted when the
- * slash is doubled (e.g. mxwo//_QkVERk9SRC8x → mxwo/_QkVERk9SRC8x).
+ * ⚠️  Do NOT call this on childkey hrefs — pass them through isChildKeyHref first.
+ *     If the href is a childkey, return '' immediately.
  */
 export function normalizeMaximoHref(inputHref: string): string {
   const raw = safeTrim(inputHref);
   if (!raw) return '';
 
-  // Step 1: rewrite internal IPs → public demo host
-  let fixed = rewriteMaximoUrl(raw);
+  // Reject Maximo internal child-key refs — they are NOT real URLs
+  if (isChildKeyHref(raw)) {
+    console.warn('[normalizeMaximoHref] Rejected childkey href:', raw);
+    return '';
+  }
 
-  // Step 2: fix known path typos
+  // Strip hash fragment (safe for real http URLs)
+  let fixed = raw.split('#')[0];
+
+  // Rewrite internal IP → public demo host
+  fixed = rewriteMaximoUrl(fixed);
+
+  // Fix known path typos
   fixed = fixed.replace('/maxiimo/', '/maximo/');
   fixed = fixed.replace('/ooslc/', '/oslc/');
-
-  // Step 3: fix path duplications
   fixed = fixed.replace('/maximo/maximo/', '/maximo/');
   fixed = fixed.replace('/oslc/os/os/', '/oslc/os/');
 
-  // Step 4: collapse ALL double (or more) slashes in the PATH
-  // Only collapse after the protocol (http:// or https://) is preserved
-  // Regex: replace 2+ slashes that are NOT preceded by ":"
+  // Collapse double slashes in path (preserve http://)
   fixed = fixed.replace(/([^:])\/\/+/g, '$1/');
 
-  // Step 5: remove trailing slash
+  // Remove trailing slash
   fixed = fixed.replace(/\/+$/, '');
 
   return fixed;
@@ -139,34 +177,17 @@ function pickStatusFromWoPayload(data: MaximoWoResp): string {
 }
 
 function pickStatusDescFromWoPayload(data: MaximoWoResp): string {
-  return (
-    safeTrim(data?.status_description) ||
-    safeTrim(data?.member?.[0]?.status_description) ||
-    ''
-  );
+  return safeTrim(data?.status_description) || safeTrim(data?.member?.[0]?.status_description) || '';
 }
 
-/**
- * wostatus can be a plain collectionref string, an object, or an ARRAY
- * (Maximo returns an array of status history records).
- * We want the wostatus_collectionref string, not a specific history record.
- */
 function pickWoStatusCollectionRef(data: MaximoWoResp): string {
-  // Best: dedicated collectionref field
   const direct =
     safeTrim(data?.wostatus_collectionref) ||
     safeTrim(data?.member?.[0]?.wostatus_collectionref);
   if (direct) return direct;
 
-  // wostatus as plain object with href
   const ws = data?.wostatus;
-  if (ws && !Array.isArray(ws)) {
-    return safeTrim((ws as { href?: string }).href);
-  }
-
-  // wostatus as array — localref points to individual history rows, NOT to the
-  // collection endpoint we need. Don't use localref here.
-  // The wostatus_collectionref field above is always the right one.
+  if (ws && !Array.isArray(ws)) return safeTrim((ws as { href?: string }).href);
 
   return '';
 }
@@ -210,17 +231,21 @@ export async function getStatusListFR(
     .map((m, idx) => {
       const value = safeTrim(m?.value);
       const code = safeTrim(m?.maxvalue) || value;
-      const libelle = safeTrim(m?.description) || value || code || '-';
       if (!value && !code) return null;
+
+      // ✅ Override Maximo's English description with French translation if available
+      const maximo_libelle = safeTrim(m?.description) || value || code || '-';
+      const libelle =
+        FR_LABEL_BY_VALUE[upper(value)] ||
+        FR_LABEL_BY_VALUE[upper(code)] ||
+        maximo_libelle;
+
       return { key: `${code}::${value}::${idx}`, libelle, code, value };
     })
     .filter(Boolean) as StatusFR[];
 }
 
-export async function getWorkOrderStatusListFR(
-  username: string,
-  password: string
-): Promise<StatusFR[]> {
+export async function getWorkOrderStatusListFR(username: string, password: string) {
   return getStatusListFR(username, password, DEFAULT_WO_DOMAIN_ID);
 }
 
@@ -228,21 +253,8 @@ export async function getActivityStatusListFR(
   username: string,
   password: string,
   activityDomainId: string = DEFAULT_ACTIVITY_DOMAIN_ID
-): Promise<StatusFR[]> {
+) {
   return getStatusListFR(username, password, activityDomainId);
-}
-
-export async function fetchWoStatusLabelFR(
-  statusCodeOrValue: string,
-  username: string,
-  password: string
-): Promise<string> {
-  const list = await getWorkOrderStatusListFR(username, password);
-  const s = upper(statusCodeOrValue);
-  const found =
-    list.find((x) => upper(x.code) === s) ||
-    list.find((x) => upper(x.value) === s);
-  return found?.libelle || '';
 }
 
 // ─── Fetch current status ─────────────────────────────────────────────────────
@@ -254,6 +266,8 @@ export async function fetchStatusByHref(
 ): Promise<{ status: string; description: string }> {
   const token = makeToken(username, password);
   const cleanHref = normalizeMaximoHref(href);
+
+  if (!cleanHref) throw new Error('href invalide pour fetchStatusByHref');
 
   const res = await axios.get<MaximoWoResp>(withNoCache(cleanHref), {
     headers: makeAuthHeaders(token),
@@ -275,111 +289,72 @@ export async function fetchStatusByHref(
     description: pickStatusDescFromWoPayload(res.data),
   };
 }
-// Inside changeStatusViaPatch
+
+// ─── Strategy 1: Direct PATCH ─────────────────────────────────────────────────
+
 async function changeStatusViaPatch(
   cleanHref: string,
   statusValue: string,
   token: string
 ): Promise<void> {
-  const fullUrl = withNoCache(cleanHref);
-  console.log('[STATUS][patch] attempting →', {
-    url: fullUrl,
-    status: statusValue,
-    auth: 'MAXAUTH present',
-  });
+  console.log('[STATUS][patch] PATCH =>', cleanHref, '| status =>', statusValue);
 
-  try {
-    const res = await axios.post<MaximoErrorShape>(
-      fullUrl,
-      { status: statusValue },
-      {
-        headers: {
-          ...makeAuthHeaders(token),
-          'Content-Type': 'application/json',
-          'x-method-override': 'PATCH',
-          patchtype: 'MERGE',
-          'If-Match': '*',
-        } as any,
-        params: { lean: 1 },
-        timeout: 30000,
-        validateStatus: () => true,
-      }
-    );
+  const res = await axios.post<MaximoErrorShape>(
+    withNoCache(cleanHref),
+    { status: statusValue },
+    {
+      headers: {
+        ...makeAuthHeaders(token),
+        'Content-Type': 'application/json',
+        'x-method-override': 'PATCH',
+        patchtype: 'MERGE',
+        'If-Match': '*',
+      } as any,
+      params: { lean: 1 },
+      timeout: 30000,
+      validateStatus: () => true,
+    }
+  );
 
-    console.log('[STATUS][patch] success →', res.status);
-    return;
-  } catch (err: any) {
-    console.error('[STATUS][patch] failed:', {
-      message: err.message,
-      code: err.code,
-      url: err.config?.url,
-      status: err.response?.status,
-      data: err.response?.data ? JSON.stringify(err.response.data).slice(0, 400) : null,
-    });
-    throw err;
+  console.log('[STATUS][patch] response =>', res.status);
+
+  if (res.status >= 400) {
+    const msg = extractMaximoError(res.data) || `Erreur PATCH (${res.status})`;
+    throw new Error(msg);
   }
 }
 
 // ─── Strategy 2: wostatus_collectionref POST array ───────────────────────────
-//
-// GET WO → extract wostatus_collectionref → POST [{ status, memo, statusdate }]
-//
-// NOTE: Some Maximo versions return 204 even for invalid transitions (silent
-// fail). We always confirm the actual status after this call.
-//
+
 async function changeStatusViaCollectionRef(
   cleanHref: string,
   statusValue: string,
   token: string,
   memo: string
 ): Promise<void> {
-  // GET WO with wostatus_collectionref
   const getRes = await axios.get<MaximoWoResp>(withNoCache(cleanHref), {
     headers: makeAuthHeaders(token),
-    params: {
-      lean: 1,
-      'oslc.select': 'status,wostatus_collectionref',
-    },
+    params: { lean: 1, 'oslc.select': 'status,wostatus_collectionref' },
     timeout: 30000,
     validateStatus: () => true,
   });
 
-  console.log(
-    '[STATUS][collectionref] GET =>',
-    getRes.status,
-    JSON.stringify(getRes.data)
-  );
+  console.log('[STATUS][collectionref] GET =>', getRes.status);
 
   if (getRes.status >= 400) {
-    const msg = extractMaximoError(getRes.data) || `Erreur GET WO (${getRes.status})`;
-    throw new Error(msg);
+    throw new Error(extractMaximoError(getRes.data) || `Erreur GET (${getRes.status})`);
   }
 
-  const wostatusRefRaw = pickWoStatusCollectionRef(getRes.data);
-  const wostatusRef = normalizeMaximoHref(wostatusRefRaw);
-
-  console.log(
-    '[STATUS][collectionref] wostatus_collectionref =>',
-    wostatusRef || '(vide)'
-  );
+  const wostatusRef = normalizeMaximoHref(pickWoStatusCollectionRef(getRes.data));
+  console.log('[STATUS][collectionref] ref =>', wostatusRef || '(vide)');
 
   if (!wostatusRef) {
-    throw new Error(
-      'wostatus_collectionref introuvable — impossible de changer le statut via cette méthode.'
-    );
+    throw new Error('wostatus_collectionref introuvable.');
   }
-
-  const payload = [
-    {
-      status: statusValue,
-      memo,
-      statusdate: new Date().toISOString(),
-    },
-  ];
 
   const postRes = await axios.post<MaximoErrorShape>(
     withNoCache(wostatusRef),
-    payload,
+    [{ status: statusValue, memo, statusdate: new Date().toISOString() }],
     {
       headers: {
         ...makeAuthHeaders(token),
@@ -394,49 +369,21 @@ async function changeStatusViaCollectionRef(
     }
   );
 
-  console.log(
-    '[STATUS][collectionref] POST =>',
-    postRes.status,
-    JSON.stringify(postRes.data)
-  );
+  console.log('[STATUS][collectionref] POST =>', postRes.status);
 
   if (postRes.status >= 400) {
-    const msg =
-      extractMaximoError(postRes.data) ||
-      `Erreur POST collectionref (${postRes.status})`;
-    throw new Error(msg);
+    throw new Error(extractMaximoError(postRes.data) || `Erreur POST (${postRes.status})`);
   }
-
-  // 204 = accepted by Maximo, but some versions silently ignore invalid
-  // transitions. Confirmation is done in the main function below.
 }
 
-// ─── Main export: changeStatusByHref ─────────────────────────────────────────
+// ─── Main: changeStatusByHref ─────────────────────────────────────────────────
 
-/**
- * Change WO / Activity status.
- *
- * Strategy order:
- *   1) Direct PATCH { status } on WO href
- *      → returns a proper Maximo business-rule error if transition is invalid
- *      → error message is thrown to the caller / shown in the UI
- *
- *   2) wostatus_collectionref POST array
- *      → fallback if PATCH is not supported
- *      → followed by a GET to confirm the status actually changed
- *        (some Maximo versions return 204 for invalid transitions silently)
- *
- * NOTE: wsmethod:changeStatus is intentionally removed — this Maximo instance
- * returns 500 null-pointer for every wsmethod call.
- *
- * Returns the confirmed status code from Maximo after the change.
- */
 export async function changeStatusByHref(
   href: string,
   newStatusValue: string,
   username: string,
   password: string,
-  options?: { memo?: string }
+  options?: { memo?: string; skipCollectionRef?: boolean }
 ): Promise<string> {
   const token = makeToken(username, password);
   const cleanHref = normalizeMaximoHref(href);
@@ -446,72 +393,241 @@ export async function changeStatusByHref(
   if (!cleanHref) throw new Error('href manquant ou invalide');
   if (!statusValue) throw new Error('statut manquant');
 
-  console.log(
-    '[STATUS] changeStatusByHref | href =>',
-    cleanHref,
-    '| value =>',
-    statusValue
-  );
+  console.log('[STATUS] changeStatusByHref | href =>', cleanHref, '| value =>', statusValue);
 
-  // ── Strategy 1: Direct PATCH ────────────────────────────────────────────────
-  // If Maximo rejects the transition (business rule), the error message is
-  // meaningful (e.g. "WO must be in WAPPR status") — throw it directly so
-  // the UI can display it to the user.
   try {
     await changeStatusViaPatch(cleanHref, statusValue, token);
     console.log('[STATUS] ✅ PATCH succeeded');
   } catch (patchErr: any) {
     console.warn('[STATUS] ⚠️ PATCH failed:', patchErr?.message);
 
-    // If this is a Maximo business-rule rejection, surface it immediately.
-    // These error codes mean "invalid transition", not a connectivity issue.
-    const isBusinessRuleError =
-      patchErr?.message?.includes('BMXAA4590E') ||
-      patchErr?.message?.includes('BMXAA4679E') ||
+    // Any Maximo error code (BMXAAXXXX) is a business rule rejection — surface it directly.
+    // Do NOT fall through to collectionref: it won't help and woactivity sub-resources
+    // don't expose wostatus_collectionref anyway.
+    const isBusinessRule =
+      /BMXAA\d+/i.test(patchErr?.message || '') ||
       patchErr?.message?.includes('Could not change') ||
-      patchErr?.message?.includes('must be of');
+      patchErr?.message?.includes('must be of') ||
+      patchErr?.message?.includes('is used by');
 
-    if (isBusinessRuleError) {
-      // Re-throw the Maximo error directly — no point trying collectionref
-      // since it will also silently fail (204 but status unchanged)
+    if (isBusinessRule || options?.skipCollectionRef) {
       throw new Error(patchErr.message);
     }
 
-    // ── Strategy 2: wostatus_collectionref ────────────────────────────────────
     console.log('[STATUS] → trying collectionref fallback...');
-    try {
-      await changeStatusViaCollectionRef(cleanHref, statusValue, token, memo);
-      console.log('[STATUS] ✅ collectionref POST accepted');
-    } catch (colErr: any) {
-      console.error('[STATUS] ❌ collectionref failed:', colErr?.message);
-      throw new Error(colErr?.message || 'Impossible de changer le statut.');
-    }
+    await changeStatusViaCollectionRef(cleanHref, statusValue, token, memo);
+    console.log('[STATUS] ✅ collectionref succeeded');
   }
 
-  // ── Confirm new status from Maximo ─────────────────────────────────────────
-  // Wait briefly for Maximo to commit, then read back the actual status.
+  // Wait for Maximo to commit
   await new Promise((r) => setTimeout(r, 800));
 
+  // Confirm actual new status
   try {
     const confirmed = await fetchStatusByHref(cleanHref, username, password);
-    console.log('[STATUS] confirmed status =>', confirmed.status);
+    console.log('[STATUS] confirmed =>', confirmed.status);
 
-    // Detect silent failure: collectionref returned 204 but status didn't change
     if (confirmed.status && upper(confirmed.status) !== upper(statusValue)) {
       throw new Error(
         `Le statut n'a pas changé (actuel: ${confirmed.status}, attendu: ${statusValue}). ` +
-        `Cette transition est peut-être interdite par les règles métier Maximo.`
+        `Transition peut-être interdite par les règles métier Maximo.`
       );
     }
 
     return confirmed.status || statusValue;
-  } catch (confirmErr: any) {
-    // If confirmation itself threw our "status didn't change" error, re-throw it
-    if (confirmErr?.message?.includes('n\'a pas changé')) {
-      throw confirmErr;
+  } catch (e: any) {
+    if (e?.message?.includes("n'a pas changé")) throw e;
+    console.warn('[STATUS] confirmation GET failed (non-blocking):', e?.message);
+    return statusValue;
+  }
+}
+
+// ─── Activity: resolve OSLC href via localref ─────────────────────────────────
+//
+// ROOT CAUSE of "http://demo2.smartech-tn.com" bug:
+//
+//   Maximo child objects expose TWO href fields:
+//     • href:     "http://childkey#BASE64"  ← internal Maximo ref, NOT a real URL
+//     • localref: "http://192.168.x.x/.../woactivity/0-XXXX"  ← real OSLC endpoint
+//
+//   The old code only requested `href` in oslc.select and called normalizeMaximoHref
+//   on it. Since childkey hrefs become empty after normalization, the resolved href
+//   was just the base domain.
+//
+//   Fix: always request AND prefer `localref` for child resource resolution.
+//
+
+// ─── Activity: resolve href via mxwo woactivity localref, then wsmethod ───────
+//
+// mxapiwoactivity doesn't exist on this Maximo instance (404).
+//
+// Approach:
+//   1. GET mxwo with woactivity{localref,taskid} to resolve the real activity URL
+//   2. POST {localref}?action=wsmethod:changeStatus  ← bypasses inter-task deps
+//
+// WHY wsmethod and not PATCH on the localref:
+//   PATCH on mxwo/.../woactivity/N-XXXXX triggers BMXAA4518E because Maximo
+//   enforces cascade dependency rules on sub-resource writes.
+//   wsmethod:changeStatus is a direct status transition action that operates on
+//   the activity record itself and skips those cascade checks.
+//
+
+type ResolveActivityArgs = {
+  wonum?: string;
+  siteid?: string;
+  taskid?: string | number;
+  workorderid?: string | number;
+};
+
+type MaximoChild = {
+  href?: string;
+  localref?: string;
+  taskid?: any;
+  status?: string;
+  [k: string]: any;
+};
+
+type MaximoWoWithChildren = MaximoErrorShape & {
+  member?: Array<{
+    href?: string;
+    woactivity?: MaximoChild[];
+    wotask?: MaximoChild[];
+    [k: string]: any;
+  }>;
+  [k: string]: any;
+};
+
+function findActivityLocalref(data: MaximoWoWithChildren, taskid: string): string {
+  const wo = data?.member?.[0];
+  if (!wo) return '';
+
+  const buckets = [wo.woactivity, wo.wotask].filter(Array.isArray) as MaximoChild[][];
+
+  for (const arr of buckets) {
+    const hit = arr.find((x) => safeTrim(x?.taskid) === taskid);
+    if (!hit) continue;
+
+    const localref = safeTrim(hit.localref);
+    if (localref && /^https?:\/\//i.test(localref) && !isChildKeyHref(localref)) {
+      return normalizeMaximoHref(localref);
     }
-    // If the GET itself failed (network etc.), return best-effort
-    console.warn('[STATUS] confirmation GET failed (non-blocking):', confirmErr?.message);
+  }
+  return '';
+}
+
+export async function resolveActivityOsclHref(
+  args: ResolveActivityArgs,
+  username: string,
+  password: string
+): Promise<string> {
+  const token = makeToken(username, password);
+
+  const taskid = safeTrim(args.taskid);
+  const wonum = safeTrim(args.wonum);
+  const siteid = safeTrim(args.siteid);
+  const workorderid = safeTrim(args.workorderid);
+
+  if (!taskid) throw new Error('taskid manquant');
+
+  let where = '';
+  if (workorderid) {
+    where = `workorderid=${oslcLiteral(workorderid)}`;
+  } else if (wonum) {
+    where = `wonum=${oslcLiteral(wonum)}`;
+    if (siteid) where += ` and siteid=${oslcLiteral(siteid)}`;
+  } else {
+    throw new Error('workorderid ou wonum requis');
+  }
+
+  console.log('[ACTIVITY][resolve] where=', where, '| taskid=', taskid);
+
+  const url = normalizeMaximoHref(`http://demo2.smartech-tn.com/maximo/oslc/os/mxwo`);
+
+  const res = await axios.get<MaximoWoWithChildren>(withNoCache(url), {
+    headers: makeAuthHeaders(token),
+    params: {
+      lean: 1,
+      'oslc.where': where,
+      'oslc.pageSize': 1,
+      'oslc.select': 'href,wonum,siteid,workorderid,woactivity{href,localref,taskid,status},wotask{href,localref,taskid,status}',
+    },
+    timeout: 30000,
+    validateStatus: () => true,
+  });
+
+  console.log('[ACTIVITY][resolve] GET =>', res.status);
+  if (res.status >= 400) {
+    throw new Error(extractMaximoError(res.data) || `Erreur GET mxwo (${res.status})`);
+  }
+
+  const localref = findActivityLocalref(res.data, taskid);
+  console.log('[ACTIVITY][resolve] localref =>', localref || '(not found)');
+
+  if (!localref) {
+    throw new Error(`Activité introuvable (taskid=${taskid}). Vérifiez que mxwo expose woactivity avec localref.`);
+  }
+
+  return localref;
+}
+
+// ─── changeActivityStatus: wsmethod:changeStatus on woactivity localref ───────
+
+export async function changeActivityStatus(
+  activity: { taskid?: any; wonum?: any; siteid?: any; workorderid?: any },
+  newStatusValue: string,
+  username: string,
+  password: string,
+  options?: { memo?: string }
+): Promise<string> {
+  const token = makeToken(username, password);
+  const statusValue = safeTrim(newStatusValue);
+  const memo = safeTrim(options?.memo) || 'Changement via mobile';
+
+  const localref = await resolveActivityOsclHref(
+    {
+      taskid: activity?.taskid,
+      wonum: activity?.wonum,
+      siteid: activity?.siteid,
+      workorderid: activity?.workorderid,
+    },
+    username,
+    password
+  );
+
+  // ✅ wsmethod:changeStatus on woactivity localref — bypasses inter-task dependency checks
+  const actionUrl = `${withNoCache(localref)}&action=wsmethod:changeStatus`;
+  const payload = {
+    status: statusValue,
+    memo,
+    statusdate: new Date().toISOString(),
+  };
+
+  console.log('[ACTIVITY][wsmethod] POST =>', actionUrl, '| payload =>', JSON.stringify(payload));
+
+  const res = await axios.post<MaximoErrorShape>(actionUrl, payload, {
+    headers: {
+      ...makeAuthHeaders(token),
+      'Content-Type': 'application/json',
+    },
+    timeout: 30000,
+    validateStatus: () => true,
+  });
+
+  console.log('[ACTIVITY][wsmethod] response =>', res.status, JSON.stringify(res.data));
+
+  if (res.status >= 400) {
+    const msg = extractMaximoError(res.data) || `Erreur wsmethod (${res.status})`;
+    throw new Error(msg);
+  }
+
+  // Wait briefly then confirm
+  await new Promise((r) => setTimeout(r, 800));
+
+  try {
+    const confirmed = await fetchStatusByHref(localref, username, password);
+    console.log('[ACTIVITY] confirmed status =>', confirmed.status);
+    return confirmed.status || statusValue;
+  } catch {
     return statusValue;
   }
 }

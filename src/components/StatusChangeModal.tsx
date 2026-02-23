@@ -15,43 +15,46 @@ import LinearGradient from 'react-native-linear-gradient';
 
 import {
   changeStatusByHref,
-  fetchStatusByHref,
+  changeActivityStatus,
   getWorkOrderStatusListFR,
   getActivityStatusListFR,
+  normalizeMaximoHref,
   DEFAULT_ACTIVITY_DOMAIN_ID,
   StatusFR,
-  normalizeMaximoHref,
 } from '../services/statusService';
+
+type ActivityCtx = {
+  taskid?: any;
+  wonum?: any;
+  siteid?: any;
+  workorderid?: any;
+};
 
 type Props = {
   visible: boolean;
   entityType: 'WO' | 'ACTIVITY';
-
-  currentStatus: string; // code (WAPPR, INPRG, ...)
+  currentStatus: string;
   href: string;
-
-  // ✅ optional context if you want later
   wonum?: string;
   siteid?: string;
-
+  activityCtx?: ActivityCtx;
   username: string;
   password: string;
-
   locked?: boolean;
-
   onClose: () => void;
   onSuccess: (x: { code: string; label: string }) => void;
-
   activityDomainId?: string;
 };
 
 function safeTrim(v: any): string {
   return typeof v === 'string' ? v.trim() : String(v ?? '').trim();
 }
-function upper(s?: string) {
+
+function upper(s?: string): string {
   return safeTrim(s).toUpperCase();
 }
-function isFinalStatus(status?: string) {
+
+function isFinalStatus(status?: string): boolean {
   const s = upper(status);
   return s === 'COMP' || s === 'CLOSE' || s === 'CAN' || s === 'CANC';
 }
@@ -63,6 +66,7 @@ export default function StatusChangeModal({
   href,
   wonum,
   siteid,
+  activityCtx,
   username,
   password,
   locked,
@@ -74,10 +78,9 @@ export default function StatusChangeModal({
   const [submitting, setSubmitting] = useState(false);
   const [list, setList] = useState<StatusFR[]>([]);
 
-  // Load status list in FR
+  // Load status list when modal opens
   useEffect(() => {
-    if (!visible) return;
-    if (!username || !password) return;
+    if (!visible || !username || !password) return;
 
     const cleanHref = normalizeMaximoHref(href);
     console.log('[MODAL][STATUS] open', {
@@ -88,30 +91,41 @@ export default function StatusChangeModal({
       siteid,
       href,
       hrefClean: cleanHref,
-      activityDomainId,
+      activityCtx,
     });
+
+    let cancelled = false;
 
     (async () => {
       try {
         setLoadingList(true);
-
         const res =
           entityType === 'ACTIVITY'
-            ? await getActivityStatusListFR(username, password, activityDomainId || DEFAULT_ACTIVITY_DOMAIN_ID)
+            ? await getActivityStatusListFR(
+                username,
+                password,
+                activityDomainId || DEFAULT_ACTIVITY_DOMAIN_ID
+              )
             : await getWorkOrderStatusListFR(username, password);
 
-        setList(res);
+        if (!cancelled) setList(res);
       } catch (e: any) {
-        Alert.alert('Erreur', e?.message || 'Impossible de charger la liste des statuts');
+        if (!cancelled) {
+          Alert.alert('Erreur', e?.message || 'Impossible de charger la liste des statuts');
+        }
       } finally {
-        setLoadingList(false);
+        if (!cancelled) setLoadingList(false);
       }
     })();
-  }, [visible, entityType, username, password, activityDomainId, href, currentStatus, locked, wonum, siteid]);
+
+    return () => { cancelled = true; };
+  }, [visible, entityType, username, password, activityDomainId]);
 
   const currentLabel = useMemo(() => {
     const cur = upper(currentStatus);
-    const found = list.find((x) => upper(x.code) === cur) || list.find((x) => upper(x.value) === cur);
+    const found =
+      list.find((x) => upper(x.code) === cur) ||
+      list.find((x) => upper(x.value) === cur);
     return found?.libelle || '';
   }, [list, currentStatus]);
 
@@ -123,19 +137,22 @@ export default function StatusChangeModal({
     }));
   }, [list, currentStatus]);
 
+  function labelForCode(code: string): string {
+    const c = upper(code);
+    const found =
+      list.find((x) => upper(x.value) === c) ||
+      list.find((x) => upper(x.code) === c);
+    return found?.libelle || code;
+  }
+
   const handlePick = async (item: StatusFR) => {
     if (submitting) return;
 
-    console.log('[MODAL][STATUS] pick', {
-      libelle: item.libelle,
-      code: item.code,
-      value: item.value,
-      current: currentStatus,
-      locked: !!locked,
-    });
-
     if (locked || isFinalStatus(currentStatus)) {
-      Alert.alert('Statut verrouillé', `Impossible de changer le statut (${upper(currentStatus)}).`);
+      Alert.alert(
+        'Statut verrouillé',
+        `Impossible de changer le statut (${upper(currentStatus)}).`
+      );
       return;
     }
 
@@ -144,31 +161,43 @@ export default function StatusChangeModal({
       return;
     }
 
-    const cleanHref = normalizeMaximoHref(href);
-    if (!cleanHref) {
-      Alert.alert('Erreur', 'href manquant');
-      return;
-    }
-
     setSubmitting(true);
     try {
-      // ✅ VERY IMPORTANT: send synonym VALUE (item.value), not code
-      await changeStatusByHref(cleanHref, item.value, username, password, {
-        memo: 'Changement via mobile',
-      });
+      let confirmedCode: string;
 
-      // ✅ verify
-      const confirmed = await fetchStatusByHref(cleanHref, username, password);
-      if (!confirmed?.status) throw new Error("Impossible de vérifier le statut après changement.");
+      if (entityType === 'ACTIVITY') {
+        // ── Activity: resolve localref then PATCH ──────────────────────────────
+        if (!activityCtx?.taskid) {
+          throw new Error('taskid manquant pour le changement de statut d\'activité');
+        }
+
+        confirmedCode = await changeActivityStatus(
+          activityCtx,
+          item.value,
+          username,
+          password,
+          { memo: 'Changement via mobile' }
+        );
+      } else {
+        // ── Work Order: PATCH directly on WO href ──────────────────────────────
+        const cleanHref = normalizeMaximoHref(href);
+        if (!cleanHref) throw new Error('href WO manquant ou invalide');
+
+        // changeStatusByHref already confirms the new status internally via GET —
+        // no need to call fetchStatusByHref again after this
+        confirmedCode = await changeStatusByHref(
+          cleanHref,
+          item.value,
+          username,
+          password,
+          { memo: 'Changement via mobile' }
+        );
+      }
+
+      const newLabel = labelForCode(confirmedCode) || item.libelle || confirmedCode;
 
       onClose();
-
-      // label in FR:
-      const newLabel =
-        (list.find((x) => upper(x.value) === upper(confirmed.status)) ||
-          list.find((x) => upper(x.code) === upper(confirmed.status)))?.libelle || item.libelle || confirmed.status;
-
-      onSuccess({ code: confirmed.status, label: newLabel });
+      onSuccess({ code: confirmedCode, label: newLabel });
     } catch (e: any) {
       console.log('[MODAL][STATUS] change error=', e?.message || e);
       Alert.alert('Statut non changé', e?.message || 'Échec changement statut');
@@ -178,38 +207,54 @@ export default function StatusChangeModal({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+    >
       <View style={styles.overlay}>
         <View style={styles.card}>
+          {/* Header */}
           <View style={styles.header}>
-            <Text style={styles.title}>Changer le statut {entityType === 'ACTIVITY' ? "d'activité" : 'OT'}</Text>
-            <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+            <Text style={styles.title}>
+              Changer le statut {entityType === 'ACTIVITY' ? "d'activité" : 'OT'}
+            </Text>
+            <TouchableOpacity onPress={onClose} style={styles.closeBtn} disabled={submitting}>
               <FeatherIcon name="x" size={18} color="#0f172a" />
             </TouchableOpacity>
           </View>
 
           <Text style={styles.subtitle}>
-            Statut actuel: {currentLabel ? `${currentLabel} (${upper(currentStatus)})` : upper(currentStatus) || '-'}
+            Statut actuel:{' '}
+            {currentLabel
+              ? `${currentLabel} (${upper(currentStatus)})`
+              : upper(currentStatus) || '-'}
           </Text>
 
+          {/* Status list */}
           {loadingList ? (
-            <View style={{ paddingVertical: 18, alignItems: 'center' }}>
+            <View style={styles.loadingContainer}>
               <ActivityIndicator size="small" color="#3b82f6" />
-              <Text style={{ marginTop: 10, fontWeight: '600', color: '#475569' }}>Chargement des statuts...</Text>
+              <Text style={styles.loadingText}>Chargement des statuts...</Text>
             </View>
           ) : (
             <FlatList
               data={options}
-              keyExtractor={(item) => item.key}
+              keyExtractor={(it) => it.key}
               renderItem={({ item }) => (
                 <TouchableOpacity
                   disabled={submitting || !!locked}
                   onPress={() => handlePick(item)}
                   style={[styles.row, item.isCurrent && styles.rowActive]}
+                  activeOpacity={0.75}
                 >
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.rowTitle, item.isCurrent && styles.rowTitleActive]}>{item.libelle}</Text>
-                    <Text style={styles.rowCode}>code: {item.code} • value: {item.value}</Text>
+                    <Text
+                      style={[styles.rowTitle, item.isCurrent && styles.rowTitleActive]}
+                    >
+                      {item.libelle}
+                    </Text>
                   </View>
 
                   {item.isCurrent ? (
@@ -220,20 +265,32 @@ export default function StatusChangeModal({
                 </TouchableOpacity>
               )}
               ItemSeparatorComponent={() => <View style={styles.sep} />}
+              style={{ maxHeight: 340 }}
             />
           )}
 
           <View style={{ height: 12 }} />
 
+          {/* Submitting indicator */}
           {submitting && (
-            <View style={styles.loadingRow}>
+            <View style={styles.submittingRow}>
               <ActivityIndicator size="small" color="#3b82f6" />
-              <Text style={styles.loadingText}>Changement en cours...</Text>
+              <Text style={styles.submittingText}>Changement en cours...</Text>
             </View>
           )}
 
-          <TouchableOpacity disabled={submitting} onPress={onClose} style={{ borderRadius: 12, overflow: 'hidden' }}>
-            <LinearGradient colors={['#e2e8f0', '#cbd5e1']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.cancelBtn}>
+          {/* Close button */}
+          <TouchableOpacity
+            disabled={submitting}
+            onPress={onClose}
+            style={{ borderRadius: 12, overflow: 'hidden' }}
+          >
+            <LinearGradient
+              colors={['#e2e8f0', '#cbd5e1']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.cancelBtn}
+            >
               <Text style={styles.cancelText}>Fermer</Text>
             </LinearGradient>
           </TouchableOpacity>
@@ -251,8 +308,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 18,
   },
-  card: { width: '100%', maxWidth: 420, backgroundColor: '#fff', borderRadius: 18, padding: 16 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  card: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    padding: 16,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
   title: { fontSize: 18, fontWeight: '800', color: '#0f172a' },
   closeBtn: {
     width: 36,
@@ -263,14 +331,35 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   subtitle: { fontSize: 13, fontWeight: '600', color: '#64748b', marginBottom: 12 },
-  row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 10, borderRadius: 12 },
+  loadingContainer: {
+    paddingVertical: 24,
+    alignItems: 'center',
+    gap: 10,
+  },
+  loadingText: { fontSize: 13, fontWeight: '600', color: '#475569' },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+  },
   rowActive: { backgroundColor: '#f0fdf4' },
   rowTitle: { fontSize: 15, fontWeight: '700', color: '#0f172a' },
   rowTitleActive: { color: '#065f46' },
   rowCode: { fontSize: 12, color: '#94a3b8', marginTop: 2 },
   sep: { height: 1, backgroundColor: '#eef2f7' },
-  loadingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 },
-  loadingText: { fontSize: 13, fontWeight: '600', color: '#475569' },
-  cancelBtn: { paddingVertical: 12, alignItems: 'center', justifyContent: 'center' },
+  submittingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 10,
+  },
+  submittingText: { fontSize: 13, fontWeight: '600', color: '#475569' },
+  cancelBtn: {
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   cancelText: { fontSize: 14, fontWeight: '800', color: '#0f172a' },
 });

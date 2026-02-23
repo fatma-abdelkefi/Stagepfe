@@ -1,4 +1,7 @@
-// src/views/DetailsActivitiesScreen.tsx
+////////////////////////////////////////////////////////////////////////////////
+// ✅ FULL UPDATED src/views/DetailsActivitiesScreen.tsx
+////////////////////////////////////////////////////////////////////////////////
+
 import React, { useMemo, useState } from 'react';
 import {
   View,
@@ -18,7 +21,11 @@ import { AppIcon, AppText, Icons } from '../ui';
 import { useAuth } from '../context/AuthContext';
 import StatusChangeModal from '../components/StatusChangeModal';
 
-import { DEFAULT_ACTIVITY_DOMAIN_ID, FR_BY_CODE } from '../services/statusService';
+import {
+  DEFAULT_ACTIVITY_DOMAIN_ID,
+  FR_BY_CODE,
+  normalizeMaximoHref,
+} from '../services/statusService';
 
 type Activity = {
   taskid?: number | string;
@@ -52,32 +59,6 @@ function getHref(activity: Activity | null | undefined): string {
   return '';
 }
 
-// NEW: Convert Maximo UI hash-link (#...) → OSLC REST endpoint for activities
-function convertUiHashToOslcActivityHref(hashUrl: string): string {
-  const trimmed = (hashUrl || '').trim();
-  if (!trimmed) return '';
-
-  if (!trimmed.includes('#')) {
-    // already looks like a REST url
-    return trimmed;
-  }
-
-  const [base] = trimmed.split('#');
-  const fragment = trimmed.split('#')[1] || '';
-
-  if (!fragment) return trimmed;
-
-  // Typical fragment: V09SS09SREVSL1dPQUNUSVZJVFkvQkVERk9SRC9UMTA4NQ--
-  // We assume it's base64-like encoding of path parts
-  // Most reliable → just append to known activity OSLC pattern
-  // Adjust "mxactivity" or object structure name if your environment uses different name
-
-  const baseUrl = base.endsWith('/') ? base : `${base}/`;
-  const oslcPath = `maximo/oslc/os/mxactivity/${fragment}`;
-
-  return `${baseUrl}${oslcPath}`;
-}
-
 function labelFR(code?: string): string {
   const c = String(code ?? '').trim().toUpperCase();
   if (!c) return '-';
@@ -89,6 +70,7 @@ export default function DetailsActivitiesScreen({ route }: Props) {
   const { username, password } = useAuth();
 
   const workOrder = route?.params?.workOrder ?? null;
+
   const rawActivities: Activity[] = Array.isArray(workOrder?.activities)
     ? (workOrder.activities as Activity[])
     : [];
@@ -109,47 +91,31 @@ export default function DetailsActivitiesScreen({ route }: Props) {
       return;
     }
 
+    // Keep only for debug (resolver does the real job)
     const rawHref = getHref(activity);
-    if (!rawHref) {
-      Alert.alert('Erreur', "href manquant pour cette activité");
-      return;
-    }
+    const oslcHref = rawHref ? normalizeMaximoHref(rawHref) : '';
 
-    // Convert UI hash → OSLC href
-    const oslcHref = convertUiHashToOslcActivityHref(rawHref);
-
-    if (!oslcHref.includes('/mxactivity/')) {
-      console.warn('Possibly incorrect OSLC href generated:', oslcHref);
-    }
-
-    setSelectedActivity({ ...activity, href: oslcHref }); // store converted version
+    setSelectedActivity({ ...activity, href: oslcHref });
     setStatusModalVisible(true);
   };
 
-  const selectedHref = getHref(selectedActivity); // now contains converted OSLC href
-  const selectedStatus = String(
-    selectedActivity?.status ?? selectedActivity?.statut ?? ''
-  ).trim().toUpperCase();
+  const selectedHref = getHref(selectedActivity);
+  const selectedStatus = String(selectedActivity?.status ?? selectedActivity?.statut ?? '').trim().toUpperCase();
 
   if (!workOrder) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity
-            onPress={() => navigation.goBack()}
-            style={styles.backButton}
-            activeOpacity={0.9}
-          >
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} activeOpacity={0.9}>
             <AppIcon name={Icons.back} size={24} color="#fff" />
           </TouchableOpacity>
           <AppText style={styles.headerTitle}>Activités</AppText>
           <View style={{ width: 44 }} />
         </View>
+
         <View style={styles.emptyContainer}>
           <AppIcon name={Icons.inbox} size={64} color="#cbd5e1" />
-          <AppText style={styles.emptyText}>
-            Données de l'ordre de travail manquantes.
-          </AppText>
+          <AppText style={styles.emptyText}>Données de l'ordre de travail manquantes.</AppText>
         </View>
       </SafeAreaView>
     );
@@ -158,16 +124,11 @@ export default function DetailsActivitiesScreen({ route }: Props) {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          style={styles.backButton}
-          activeOpacity={0.9}
-        >
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} activeOpacity={0.9}>
           <AppIcon name={Icons.back} size={24} color="#fff" />
         </TouchableOpacity>
-        <AppText style={styles.headerTitle}>
-          Activités - #{workOrder.wonum ?? 'N/A'}
-        </AppText>
+
+        <AppText style={styles.headerTitle}>Activités - #{workOrder.wonum ?? 'N/A'}</AppText>
         <View style={{ width: 44 }} />
       </View>
 
@@ -175,9 +136,7 @@ export default function DetailsActivitiesScreen({ route }: Props) {
         {activities.length === 0 ? (
           <View style={styles.emptyContainer}>
             <AppIcon name={Icons.inbox} size={64} color="#cbd5e1" />
-            <AppText style={styles.emptyText}>
-              Aucune activité pour cet ordre de travail
-            </AppText>
+            <AppText style={styles.emptyText}>Aucune activité pour cet ordre de travail</AppText>
           </View>
         ) : (
           <View style={styles.listContainer}>
@@ -196,19 +155,12 @@ export default function DetailsActivitiesScreen({ route }: Props) {
                     </View>
 
                     <View style={{ flex: 1 }}>
-                      <AppText style={styles.title}>
-                        Activité {item?.taskid ?? 'N/A'}
-                      </AppText>
+                      <AppText style={styles.title}>Activité {item?.taskid ?? 'N/A'}</AppText>
 
-                      {!!item?.labhrs && (
-                        <AppText style={styles.subtitle}>
-                          Durée : {item.labhrs} h
-                        </AppText>
-                      )}
+                      {!!item?.labhrs && <AppText style={styles.subtitle}>Durée : {item.labhrs} h</AppText>}
 
                       <AppText style={styles.statusLine}>
-                        Statut :{' '}
-                        <AppText style={styles.statusValue}>{statusLabel}</AppText>
+                        Statut : <AppText style={styles.statusValue}>{statusLabel}</AppText>
                       </AppText>
                     </View>
 
@@ -218,8 +170,7 @@ export default function DetailsActivitiesScreen({ route }: Props) {
                       activeOpacity={0.85}
                       disabled={opening}
                     >
-                      {opening &&
-                      String(selectedActivity?.taskid) === String(item?.taskid) ? (
+                      {opening && String(selectedActivity?.taskid) === String(item?.taskid) ? (
                         <ActivityIndicator size="small" color="#fff" />
                       ) : (
                         <AppText style={styles.changeBtnText}>Changer</AppText>
@@ -227,9 +178,7 @@ export default function DetailsActivitiesScreen({ route }: Props) {
                     </TouchableOpacity>
                   </View>
 
-                  <AppText style={styles.description}>
-                    {item?.description || 'Aucune description'}
-                  </AppText>
+                  <AppText style={styles.description}>{item?.description || 'Aucune description'}</AppText>
                 </View>
               );
             })}
@@ -241,18 +190,22 @@ export default function DetailsActivitiesScreen({ route }: Props) {
         visible={statusModalVisible}
         entityType="ACTIVITY"
         currentStatus={selectedStatus}
-        href={selectedHref}                    // ← now the converted OSLC href
+        href={selectedHref}
         username={username || ''}
         password={password || ''}
         activityDomainId={DEFAULT_ACTIVITY_DOMAIN_ID}
+        activityCtx={{
+          taskid: selectedActivity?.taskid,
+          wonum: selectedActivity?.wonum ?? workOrder?.wonum,
+          siteid: selectedActivity?.siteid ?? workOrder?.siteid,
+          workorderid: selectedActivity?.workorderid ?? workOrder?.workorderid,
+        }}
         onClose={() => setStatusModalVisible(false)}
         onSuccess={({ code }) => {
           if (!selectedActivity) return;
           setActivities((prev) =>
             prev.map((a) =>
-              String(a?.taskid) === String(selectedActivity?.taskid)
-                ? { ...a, status: code, statut: code }
-                : a
+              String(a?.taskid) === String(selectedActivity?.taskid) ? { ...a, status: code, statut: code } : a
             )
           );
           Alert.alert('Succès', `Statut activité changé vers : ${labelFR(code)}`);
@@ -283,12 +236,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 20, fontWeight: '700', color: '#fff' },
   content: { flex: 1, padding: 16 },
-  sectionInfo: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#64748b',
-    marginBottom: 16,
-  },
+  sectionInfo: { fontSize: 15, fontWeight: '600', color: '#64748b', marginBottom: 16 },
   listContainer: { paddingBottom: 24 },
   itemCard: {
     backgroundColor: '#fff',
@@ -303,12 +251,7 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 2,
   },
-  itemHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-    gap: 12,
-  },
+  itemHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 12, gap: 12 },
   iconContainer: {
     width: 48,
     height: 48,
@@ -318,12 +261,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   title: { fontSize: 16, fontWeight: '700', color: '#0f172a' },
-  subtitle: {
-    fontSize: 14,
-    color: '#3b82f6',
-    marginTop: 4,
-    fontWeight: '600',
-  },
+  subtitle: { fontSize: 14, color: '#3b82f6', marginTop: 4, fontWeight: '600' },
   statusLine: { marginTop: 6, fontSize: 13, color: '#64748b', fontWeight: '700' },
   statusValue: { color: '#0f172a', fontWeight: '900' },
   changeBtn: {
@@ -335,12 +273,7 @@ const styles = StyleSheet.create({
   },
   changeBtnText: { color: '#fff', fontWeight: '900', fontSize: 12 },
   description: { fontSize: 15, color: '#334155', lineHeight: 22 },
-  emptyContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 120,
-  },
+  emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 120 },
   emptyText: {
     marginTop: 16,
     fontSize: 16,
