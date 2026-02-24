@@ -1,20 +1,17 @@
 // src/views/DetailsDocumentsScreen.tsx
 import React, { useMemo } from 'react';
-import {
-  View,
-  StyleSheet,
-  FlatList,
-  SafeAreaView,
-  TouchableOpacity,
-} from 'react-native';
+import { View, StyleSheet, FlatList, SafeAreaView, TouchableOpacity } from 'react-native';
 
-import LinearGradient from 'react-native-linear-gradient';
 import { RouteProp, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 
-// ✅ centralisé
-import { AppIcon, AppText, Colors, Spacing, Radius, Shadow, Gradients, Icons } from '../ui';
+// ✅ keep your existing central UI
+import { AppIcon, AppText, Colors, Spacing, Radius, Shadow, Icons } from '../ui';
+
+// ✅ unified header + details styles
+import DetailsHeader from '../ui/details/DetailsHeader';
+import { detailsStyles } from '../ui/details/detailsStyles';
 
 type Props = { route: RouteProp<RootStackParamList, 'DetailsDocuments'> };
 type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'DetailsDocuments'>;
@@ -112,52 +109,25 @@ export default function DetailsDocumentsScreen({ route }: Props) {
   };
 
   const renderEmpty = () => (
-    <View style={styles.emptyState}>
-      <View style={styles.emptyIconCircle}>
-        <AppIcon name={Icons.folder} size={48} color={Colors.emptyGray} />
-      </View>
-      <AppText style={styles.emptyTitle}>Aucun document</AppText>
-      <AppText style={styles.emptyText}>
+    <View style={detailsStyles.emptyContainer}>
+      <AppIcon name={Icons.folder} size={64} color="#cbd5e1" />
+      <AppText style={detailsStyles.emptyText}>
         Il n&apos;y a pas encore de documents attachés à cet ordre de travail
       </AppText>
     </View>
   );
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Header avec gradient */}
-      <LinearGradient
-        colors={[...Gradients.header]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.header}
-      >
-        <View style={styles.headerContent}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn} activeOpacity={0.9}>
-            <AppIcon name={Icons.back} size={22} color="#fff" />
-          </TouchableOpacity>
+    <SafeAreaView style={detailsStyles.container}>
+      {/* ✅ Unified header (same as all details screens) */}
+      <DetailsHeader title="Documents" subtitle={`OT #${workOrder?.wonum ?? '-'}`} />
 
-          <View style={styles.headerTextContainer}>
-            <AppText style={styles.headerTitle}>Documents</AppText>
-            <AppText style={styles.headerSubtitle}>OT #{workOrder?.wonum}</AppText>
-          </View>
-
-          <View style={styles.badgeContainer}>
-            {documents.length > 0 && (
-              <View style={styles.countBadge}>
-                <AppText style={styles.countText}>{documents.length}</AppText>
-              </View>
-            )}
-          </View>
-        </View>
-      </LinearGradient>
-
-      {/* Liste des documents */}
+      {/* ✅ List (unchanged logic) */}
       <FlatList
         data={documents}
         renderItem={renderDocument}
         keyExtractor={(_, index) => `doc-${index}`}
-        contentContainerStyle={styles.listContainer}
+        contentContainerStyle={[styles.listContainer, documents.length === 0 && { flexGrow: 1 }]}
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={renderEmpty}
       />
@@ -166,61 +136,7 @@ export default function DetailsDocumentsScreen({ route }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.docBg },
-
-  header: {
-    paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.md,
-    paddingBottom: Spacing.xl,
-    borderBottomLeftRadius: Radius.docHeader,
-    borderBottomRightRadius: Radius.docHeader,
-    ...Shadow.docHeader,
-  },
-
-  headerContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-
-  backBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: Radius.lg,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  headerTextContainer: { flex: 1, marginLeft: Spacing.lg },
-
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: '#fff',
-    letterSpacing: 0.3,
-  },
-
-  headerSubtitle: {
-    fontSize: 13,
-    color: 'rgba(255, 255, 255, 0.85)',
-    marginTop: 2,
-    fontWeight: '500',
-  },
-
-  badgeContainer: { minWidth: 42, alignItems: 'flex-end' },
-
-  countBadge: {
-    backgroundColor: 'rgba(255, 255, 255, 0.25)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: Radius.lg,
-    minWidth: 36,
-    alignItems: 'center',
-  },
-
-  countText: { fontSize: 14, fontWeight: '800', color: '#fff' },
-
+  // ✅ keep same background system but align with details design
   listContainer: { padding: Spacing.xl, paddingBottom: 32 },
 
   documentCard: {
@@ -285,36 +201,5 @@ const styles = StyleSheet.create({
     color: '#334155',
     lineHeight: 20,
     fontWeight: '500',
-  },
-
-  emptyState: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 80,
-    paddingHorizontal: 40,
-  },
-
-  emptyIconCircle: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: Colors.docBg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
-  },
-
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#334155',
-    marginBottom: 8,
-  },
-
-  emptyText: {
-    fontSize: 15,
-    color: Colors.muted,
-    textAlign: 'center',
-    lineHeight: 22,
   },
 });

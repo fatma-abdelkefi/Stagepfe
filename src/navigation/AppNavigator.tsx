@@ -17,14 +17,14 @@ import DocDetailsScreen from '../views/DocDetailsScreen';
 import DocViewerScreen from '../views/DocViewerScreen';
 import DetailsActualLaborScreen from '../views/DetailsActualLaborScreen';
 import DetailsActualMaterialsScreen from '../views/DetailsActualMaterialsScreen';
+import DetailsWorkLogScreen from '../views/DetailsWorkLogScreen';
+
 // Add screens
 import AddMaterialScreen from '../views/AddMaterialScreen';
 import AddLaborScreen from '../views/AddLaborScreen';
 import AddDoclinkScreen from '../views/AddDoclinkScreen';
 import AddActualMaterialScreen from '../views/AddActualMaterialScreen';
 import AddActualLaborScreen from '../views/AddActualLaborScreen';
-
-import DetailsWorkLogScreen from '../views/DetailsWorkLogScreen';
 import AddWorkLogScreen from '../views/AddWorkLogScreen';
 
 import type { WorkOrder } from '../viewmodels/WorkOrdersViewModel';
@@ -42,8 +42,10 @@ export type RootStackParamList = {
   DetailsLabor: { workOrder: WorkOrder };
   DetailsMaterials: { workOrder: WorkOrder };
   DetailsDocuments: { workOrder: WorkOrder };
-  DetailsActualLabor: { workOrder: any };
-  DetailsActualMaterials: { workOrder: any };
+
+  // ✅ Better: keep same WorkOrder type everywhere
+  DetailsActualLabor: { workOrder: WorkOrder };
+  DetailsActualMaterials: { workOrder: WorkOrder };
 
   // Documents screens
   DocDetails: { document: any };
@@ -69,15 +71,19 @@ export type RootStackParamList = {
     ownerid: number;
     siteid: string;
   };
-  AddActualMaterial: { woHref: string };
-AddActualLabor: { woHref: string };
 
-DetailsWorkLog: { workOrder: any }; 
+  // ✅ Actuals add screens
+  AddActualMaterial: { woHref: string; wonum: string; siteid: string };
+  AddActualLabor: { woHref: string; wonum: string; siteid: string };
+
+  DetailsWorkLog: { workOrder: WorkOrder };
+
   AddWorkLog: {
     wonum: string;
     siteid?: string;
     workorderid?: number | string;
     mxwoDetailsHref?: string;
+    worklogCollectionRef?: string;
   };
 };
 
@@ -100,16 +106,13 @@ export default function AppNavigator() {
 
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName="Launch">
-      {/* Always available */}
       <Stack.Screen name="Launch" component={LaunchScreen} />
 
-      {/* Auth */}
       {isLoggedIn ? (
         <>
           <Stack.Screen name="WorkOrders" component={WorkOrdersScreen} />
           <Stack.Screen name="WorkOrderDetails" component={WorkOrderDetailsScreen} />
 
-          {/* Category detail screens */}
           <Stack.Screen name="DetailsActivities" component={DetailsActivitiesScreen} />
           <Stack.Screen name="DetailsLabor" component={DetailsLaborScreen} />
           <Stack.Screen name="DetailsMaterials" component={DetailsMaterialsScreen} />
@@ -117,27 +120,17 @@ export default function AppNavigator() {
           <Stack.Screen name="DetailsActualLabor" component={DetailsActualLaborScreen} />
           <Stack.Screen name="DetailsActualMaterials" component={DetailsActualMaterialsScreen} />
 
-          {/* Documents */}
           <Stack.Screen name="DocDetails" component={DocDetailsScreen} />
           <Stack.Screen name="DocViewer" component={DocViewerScreen} />
 
-          {/* Add screens */}
           <Stack.Screen name="AddLabor" component={AddLaborScreen} />
           <Stack.Screen name="AddMaterial" component={AddMaterialScreen} />
           <Stack.Screen name="AddDoclink" component={AddDoclinkScreen} />
           <Stack.Screen name="AddActualMaterial" component={AddActualMaterialScreen} />
           <Stack.Screen name="AddActualLabor" component={AddActualLaborScreen} />
-          <Stack.Screen
-            name="DetailsWorkLog"
-            component={DetailsWorkLogScreen}
-            options={{ title: 'Work log' }}
-          />
 
-          <Stack.Screen
-            name="AddWorkLog"
-            component={AddWorkLogScreen}
-            options={{ title: 'Ajouter Work log' }}
-          />
+          <Stack.Screen name="DetailsWorkLog" component={DetailsWorkLogScreen} options={{ title: 'Work log' }} />
+          <Stack.Screen name="AddWorkLog" component={AddWorkLogScreen} options={{ title: 'Ajouter Work log' }} />
         </>
       ) : (
         <Stack.Screen name="Login" component={LoginScreen} />

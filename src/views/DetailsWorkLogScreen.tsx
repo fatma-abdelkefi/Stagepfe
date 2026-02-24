@@ -1,19 +1,12 @@
-// src/screens/DetailsWorkLogScreen.tsx
 import React, { useMemo, useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Modal,
-  Platform,
-} from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { RouteProp } from '@react-navigation/native';
 import { useNavigation } from '@react-navigation/native';
 import FeatherIcon from 'react-native-vector-icons/Feather';
-import LinearGradient from 'react-native-linear-gradient';
+
+import DetailsHeader from '../ui/details/DetailsHeader';
+import { detailsStyles } from '../ui/details/detailsStyles';
 
 type RootStackParamList = any;
 type Props = { route: RouteProp<RootStackParamList, 'DetailsWorkLog'> };
@@ -21,7 +14,6 @@ type Props = { route: RouteProp<RootStackParamList, 'DetailsWorkLog'> };
 function fixHost(url: string) {
   return String(url || '').replace('http://192.168.1.202:9080', 'http://demo2.smartech-tn.com');
 }
-
 function formatDate(s?: string) {
   if (!s) return '-';
   return String(s).replace('T', ' ').replace(/:\d{2}\+\d{2}:\d{2}$/, '');
@@ -32,55 +24,26 @@ export default function DetailsWorkLogScreen({ route }: Props) {
   const workOrder = (route as any)?.params?.workOrder;
 
   const worklogs = useMemo(() => {
-  const arr =
-    (workOrder as any)?.workLogs ??
-    (workOrder as any)?.worklog ??
-    [];
-  return [...arr].sort((a: any, b: any) =>
-    String(b?.createdate || '').localeCompare(String(a?.createdate || ''))
-  );
-}, [workOrder]);
+    const arr = (workOrder as any)?.workLogs ?? (workOrder as any)?.worklog ?? [];
+    return [...arr].sort((a: any, b: any) => String(b?.createdate || '').localeCompare(String(a?.createdate || '')));
+  }, [workOrder]);
 
   const [selected, setSelected] = useState<any>(null);
 
   return (
-    <SafeAreaView style={styles.container}>
-      <LinearGradient
-        colors={['#3b82f6', '#2563eb', '#1e40af']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.header}
-      >
-        <View style={styles.headerTop}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <FeatherIcon name="arrow-left" size={20} color="#fff" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Work Log</Text>
-          <View style={styles.backButton} />
-        </View>
+    <SafeAreaView style={detailsStyles.container}>
+      <DetailsHeader title="Work Log" subtitle={`OT #${workOrder?.wonum ?? '-'}`} />
 
-        <View style={styles.subHeaderCard}>
-          <Text style={styles.subLabel}>OT</Text>
-          <Text style={styles.subValue}>#{workOrder?.wonum ?? '-'}</Text>
-          <Text style={styles.subDesc} numberOfLines={2}>
-            {(workOrder?.description as string) || '—'}
-          </Text>
-        </View>
-      </LinearGradient>
-
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[detailsStyles.content, { paddingBottom: 24 }]} showsVerticalScrollIndicator={false}>
         {worklogs.length === 0 ? (
-          <View style={styles.emptyBox}>
-            <FeatherIcon name="message-square" size={28} color="#94a3b8" />
-            <Text style={styles.emptyText}>Aucun Work Log</Text>
+          <View style={detailsStyles.emptyContainer}>
+            <FeatherIcon name="message-square" size={40} color="#cbd5e1" />
+            <Text style={detailsStyles.emptyText}>Aucun Work Log</Text>
           </View>
         ) : (
           worklogs.map((wl: any) => {
             const summary = wl?.description || '—';
-            const longText =
-              wl?.description_longdescription?.ldtext ??
-              wl?.description_longdescription ??
-              '';
+            const longText = wl?.description_longdescription?.ldtext ?? wl?.description_longdescription ?? '';
             const hasLong = !!String(longText || '').trim();
 
             return (
@@ -94,9 +57,7 @@ export default function DetailsWorkLogScreen({ route }: Props) {
                   <View style={styles.left}>
                     <View style={styles.badge}>
                       <FeatherIcon name="file-text" size={14} color="#2563eb" />
-                      <Text style={styles.badgeText}>
-                        {wl?.logtype_description || wl?.logtype || '—'}
-                      </Text>
+                      <Text style={styles.badgeText}>{wl?.logtype_description || wl?.logtype || '—'}</Text>
                     </View>
 
                     <Text style={styles.summary} numberOfLines={2}>
@@ -157,9 +118,7 @@ export default function DetailsWorkLogScreen({ route }: Props) {
 
             <Text style={styles.modalSection}>Details</Text>
             <View style={[styles.textBox, { minHeight: 120 }]}>
-              <Text style={styles.textBoxText}>
-                {String(selected?._longText || '').trim() ? selected?._longText : '—'}
-              </Text>
+              <Text style={styles.textBoxText}>{String(selected?._longText || '').trim() ? selected?._longText : '—'}</Text>
             </View>
 
             {!!selected?.localref && (
@@ -172,11 +131,7 @@ export default function DetailsWorkLogScreen({ route }: Props) {
               </TouchableOpacity>
             )}
 
-            {!!selected?._showRef && (
-              <Text style={styles.refText} selectable>
-                {fixHost(selected?.localref)}
-              </Text>
-            )}
+            {!!selected?._showRef && <Text style={styles.refText} selectable>{fixHost(selected?.localref)}</Text>}
           </View>
         </View>
       </Modal>
@@ -185,36 +140,6 @@ export default function DetailsWorkLogScreen({ route }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc' },
-
-  header: {
-    paddingTop: Platform.OS === 'android' ? 10 : 12,
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
-  },
-  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  backButton: {
-    width: 44,
-    height: 44,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTitle: { fontSize: 18, fontWeight: '800', color: '#fff' },
-
-  subHeaderCard: { backgroundColor: 'rgba(255,255,255,0.98)', borderRadius: 12, padding: 12 },
-  subLabel: { fontSize: 12, color: '#64748b', fontWeight: '700' },
-  subValue: { fontSize: 18, fontWeight: '900', color: '#2563eb', marginTop: 2 },
-  subDesc: { marginTop: 6, fontSize: 13, color: '#0f172a', fontWeight: '600' },
-
-  content: { padding: 16, paddingBottom: 24 },
-
-  emptyBox: { alignItems: 'center', justifyContent: 'center', paddingVertical: 40 },
-  emptyText: { marginTop: 10, fontSize: 14, color: '#94a3b8', fontWeight: '700' },
-
   card: {
     backgroundColor: '#fff',
     borderRadius: 16,
