@@ -1,18 +1,20 @@
-// ✅ src/services/workOrderDetailsService.ts
+// src/services/workOrderDetailsService.ts
 import axios from 'axios';
 import type { WorkOrder } from '../viewmodels/WorkOrdersViewModel';
 
 import { MAXIMO } from '../config/maximoUrls';
 import { makeToken } from './maximoClient';
-import { rewriteDoclinkUrl, metaToDoclinkUrl } from './doclinks';
+import { rewriteDoclinkUrl, metaToDoclinkUrl, doclinkToMetaUrl } from './doclinks';
+import { rewriteMaximoUrl } from './rewriteMaximoUrl';
 
 // ✅ Maximo endpoints
 const BASE_URL = `${MAXIMO.OSLC_OS}/mxwo`;
+const MXWO_DETAILS_URL = `${MAXIMO.OSLC_OS}/sm_mxwodetails`;
 
 // --------------------------
 // Helpers
 // --------------------------
-export const parseLabHrs = (val: string | number | undefined | null): number => {
+export const parseLabHrs = (val: string | number | undefined): number => {
   if (val === undefined || val === null || val === '') return 0;
   if (typeof val === 'number') return val;
 
@@ -29,7 +31,7 @@ export const parseLabHrs = (val: string | number | undefined | null): number => 
 };
 
 function safeTrim(v: any): string {
-  return typeof v === 'string' ? v.trim() : String(v ?? '').trim();
+  return typeof v === 'string' ? v.trim() : '';
 }
 
 function filenameFromUrl(u?: string): string {
@@ -88,89 +90,18 @@ function extractMaximoError(res: any): string {
   return http;
 }
 
-// ✅ IMPORTANT: MAXAUTH ONLY
-function maxauthHeaders(token: string): any {
-  return {
-    MAXAUTH: token,
-    Accept: 'application/json',
-    'Content-Type': 'application/json',
-    'Cache-Control': 'no-cache',
-    Pragma: 'no-cache',
-  };
-}
-
 function patchHeaders(token: string): any {
   return {
-    ...maxauthHeaders(token),
+    MAXAUTH: token,
+    Authorization: `Basic ${token}`,
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
     'x-method-override': 'PATCH',
     patchtype: 'MERGE',
     'If-Match': '*',
+    'Cache-Control': 'no-cache',
+    Pragma: 'no-cache',
   };
-}
-
-/**
- * ✅ CRITICAL FIX:
- * Maximo may return href with LAN host (192.168.x.x).
- * Mobile must always call public host (demo2...).
- */
-export function normalizeOslcHref(anyHref: string): string {
-  const href = String(anyHref || '').trim();
-  if (!href) return '';
-
-  const publicBase = String(MAXIMO.OSLC_OS).split('/oslc/os')[0].replace(/\/+$/, '');
-
-  if (href.startsWith(publicBase)) return href.replace(/\/+$/, '');
-
-  const idxOslc = href.indexOf('/oslc/os/');
-  if (idxOslc >= 0) {
-    const tail = href.substring(idxOslc);
-    return `${publicBase}${tail}`.replace(/\/+$/, '');
-  }
-
-  const idxMaximo = href.indexOf('/maximo/');
-  if (idxMaximo >= 0) {
-    const tail = href.substring(idxMaximo + '/maximo'.length);
-    return `${publicBase}${tail}`.replace(/\/+$/, '');
-  }
-
-  if (href.startsWith('/')) return `${publicBase}${href}`.replace(/\/+$/, '');
-
-  return href.replace(/\/+$/, '');
-}
-
-// --------------------------
-// ✅ NEW: Always re-fetch the real mxwo href by wonum (fixes corrupted woHref between screens)
-// --------------------------
-export async function getWoHrefByWonum(
-  wonum: string,
-  username: string,
-  password: string
-): Promise<string> {
-  const token = makeToken(username, password);
-
-  const res = await axios.get<any>(BASE_URL, {
-    headers: {
-      MAXAUTH: token,
-      Accept: 'application/json',
-      'Cache-Control': 'no-cache',
-      Pragma: 'no-cache',
-    },
-    params: {
-      lean: 1,
-      'oslc.where': `wonum="${wonum}"`,
-      'oslc.pageSize': 1,
-      'oslc.select': 'href,wonum,siteid',
-      _ts: Date.now(),
-    },
-    timeout: 30000,
-    validateStatus: () => true,
-  });
-
-  if (res.status >= 400) throw new Error(extractMaximoError(res));
-  const href = String(res.data?.member?.[0]?.href ?? '').trim();
-  const fixed = normalizeOslcHref(href);
-  if (!fixed) throw new Error('href mxwo introuvable pour ce wonum');
-  return fixed.replace(/\/+$/, '');
 }
 
 // --------------------------
@@ -208,11 +139,11 @@ export function normalizeDoclinks(raw: any): NormalizedDocLink[] {
     const describedByHref = rewriteDoclinkUrl(safeTrim(d?.describedBy?.href));
     const describedByDesc = safeTrim(d?.describedBy?.description);
 
-    const href = normalizeOslcHref(rewriteDoclinkUrl(metaToDoclinkUrl(safeTrim(d?.href) || safeTrim(di?.href))));
+    const href = rewriteDoclinkUrl(metaToDoclinkUrl(safeTrim(d?.href) || safeTrim(di?.href)));
     const doclinkId = extractDoclinkIdFromHref(href);
 
     const rawUrl = safeTrim(d?.urlname) || safeTrim(di?.urlname) || safeTrim(di?.href) || safeTrim(d?.href);
-    const urlname = normalizeOslcHref(rewriteDoclinkUrl(rawUrl));
+    const urlname = rewriteDoclinkUrl(rawUrl);
 
     const title =
       safeTrim(d?.upload_documentname) ||
@@ -266,14 +197,14 @@ export async function getDoclinkDetailsByHref(
   password: string
 ): Promise<Partial<NormalizedDocLink> | null> {
   const token = makeToken(username, password);
-
-  const fixed = normalizeOslcHref(rewriteDoclinkUrl(metaToDoclinkUrl(anyHref)));
+  const fixed = rewriteDoclinkUrl(metaToDoclinkUrl(anyHref));
   if (!fixed) return null;
 
   try {
     const res = await axios.get<any>(fixed, {
       headers: {
         MAXAUTH: token,
+        Authorization: `Basic ${token}`,
         Accept: 'application/json',
         properties: '*',
       },
@@ -322,8 +253,89 @@ export async function getDoclinkDetailsByHref(
 
     const rawUrl = safeTrim(obj?.urlname) || safeTrim(di?.urlname) || safeTrim(obj?.href) || safeTrim(di?.href);
 
-    const urlname = normalizeOslcHref(rewriteDoclinkUrl(rawUrl));
-    const href = normalizeOslcHref(rewriteDoclinkUrl(metaToDoclinkUrl(safeTrim(obj?.href) || safeTrim(di?.href))));
+    const urlname = rewriteDoclinkUrl(rawUrl);
+    const href = rewriteDoclinkUrl(metaToDoclinkUrl(safeTrim(obj?.href) || safeTrim(di?.href)));
+
+    const display = title || filenameFromUrl(urlname) || filenameFromUrl(href);
+
+    return {
+      document: display || undefined,
+      description: desc || undefined,
+      createdate: createdate || undefined,
+      urlname: urlname || undefined,
+      href: href || undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function getDoclinkMetaByHref(
+  anyHref: string,
+  username: string,
+  password: string
+): Promise<Partial<NormalizedDocLink> | null> {
+  const token = makeToken(username, password);
+
+  const metaUrl = rewriteDoclinkUrl(doclinkToMetaUrl(anyHref));
+  if (!metaUrl) return null;
+
+  try {
+    const res = await axios.get<any>(metaUrl, {
+      headers: {
+        MAXAUTH: token,
+        Authorization: `Basic ${token}`,
+        Accept: 'application/json',
+        properties: '*',
+      },
+      params: {
+        lean: 1,
+        'oslc.select': '*,docinfo{*},describedBy{*}',
+        'oslc.expand': 'docinfo,describedBy',
+        _ts: Date.now(),
+      },
+      timeout: 30000,
+      validateStatus: () => true,
+    });
+
+    if (res.status >= 400) return null;
+
+    const obj: any = res.data?.member?.[0] ?? res.data;
+    if (!obj) return null;
+
+    const di = pickDocInfo(obj);
+
+    const title =
+      safeTrim(obj?.upload_documentname) ||
+      safeTrim(obj?.documenttitle) ||
+      safeTrim(obj?.documentname) ||
+      safeTrim(obj?.filename) ||
+      safeTrim(di?.upload_documentname) ||
+      safeTrim(di?.documenttitle) ||
+      safeTrim(di?.documentname) ||
+      safeTrim(di?.doctitle) ||
+      safeTrim(di?.title);
+
+    const desc =
+      safeTrim(obj?.description) ||
+      safeTrim(di?.description) ||
+      safeTrim(obj?.describedBy?.description) ||
+      '';
+
+    const createdate =
+      safeTrim(obj?.createdate) ||
+      safeTrim(di?.createdate) ||
+      safeTrim(obj?.creationdate) ||
+      safeTrim(di?.creationdate) ||
+      safeTrim(obj?.changedate) ||
+      safeTrim(di?.changedate) ||
+      '';
+
+    const rawUrl = safeTrim(obj?.urlname) || safeTrim(di?.urlname) || safeTrim(obj?.href) || safeTrim(di?.href);
+
+    const urlname = rewriteDoclinkUrl(rawUrl);
+
+    const href = rewriteDoclinkUrl(metaToDoclinkUrl(safeTrim(obj?.href) || safeTrim(di?.href) || metaUrl));
 
     const display = title || filenameFromUrl(urlname) || filenameFromUrl(href);
 
@@ -340,57 +352,52 @@ export async function getDoclinkDetailsByHref(
 }
 
 // --------------------------
-// ✅ ACTUALS READ (FROM MXWO ONLY)
+// ✅ ACTUALS GET (LABTRANS + MATUSETRANS) - FIXED + returns mxwoDetailsHref
 // --------------------------
 export type ActualLaborItem = { laborcode: string; regularhrs: number };
 export type ActualMaterialItem = { itemnum: string; itemqty: number; description: string };
 
-function normalizeCollectionAny(v: any): any[] {
-  if (!v) return [];
-  if (Array.isArray(v)) return v;
-  if (Array.isArray(v?.member)) return v.member;
-  return [v];
-}
-
-export async function getActualsFromWoHref(
-  woHref: string,
+export async function getActualMaterialAndLabor(
+  wonum: string,
+  siteid: string,
   username: string,
   password: string
-): Promise<{ actualLabor: ActualLaborItem[]; actualMaterials: ActualMaterialItem[] }> {
+): Promise<{ actualLabor: ActualLaborItem[]; actualMaterials: ActualMaterialItem[]; mxwoDetailsHref?: string }> {
   const token = makeToken(username, password);
 
-  const fixedHref = normalizeOslcHref(woHref).replace(/\/+$/, '');
-
-  console.log('[ACTUALS] GET URL:', fixedHref);
-
-  const res = await axios.get<any>(fixedHref, {
+  const res = await axios.get<any>(MXWO_DETAILS_URL, {
     headers: {
       MAXAUTH: token,
+      Authorization: `Basic ${token}`,
       Accept: 'application/json',
       'Cache-Control': 'no-cache',
       Pragma: 'no-cache',
     },
     params: {
       lean: 1,
-      'oslc.select': 'href,wonum,labtrans{laborcode,regularhrs},matusetrans{itemnum,itemqty,description}',
-      'oslc.expand': 'labtrans,matusetrans',
+      'oslc.select': 'href,wonum,LABTRANS{laborcode,regularhrs},MATUSETRANS{itemnum,itemqty,description}',
+      'oslc.where': `wonum="${wonum}" and siteid="${siteid}"`,
+      ignorecollectionref: 1,
+      'oslc.pageSize': 1,
       _ts: Date.now(),
     },
     timeout: 30000,
     validateStatus: () => true,
   });
 
-  console.log('[ACTUALS] status:', res.status);
-
-  if (res.status >= 400) return { actualLabor: [], actualMaterials: [] };
+  if (res.status >= 400) return { actualLabor: [], actualMaterials: [], mxwoDetailsHref: '' };
 
   const obj = res.data?.member?.[0] ?? res.data ?? {};
 
-  const labRaw = pickAnyKey(obj, ['labtrans', 'LABTRANS']);
-  const matRaw = pickAnyKey(obj, ['matusetrans', 'MATUSETRANS']);
+  // ✅ THIS is the href needed for POST actuals
+  const mxwoDetailsHref = safeTrim(obj?.href);
 
-  const labArr = normalizeCollectionAny(labRaw);
-  const matArr = normalizeCollectionAny(matRaw);
+  // Maximo sometimes returns lower-case keys in JSON
+  const labRaw = pickAnyKey(obj, ['LABTRANS', 'labtrans']);
+  const matRaw = pickAnyKey(obj, ['MATUSETRANS', 'matusetrans']);
+
+  const labArr = toArrayAny(labRaw);
+  const matArr = toArrayAny(matRaw);
 
   const actualLabor: ActualLaborItem[] = labArr
     .map((l: any) => ({
@@ -407,83 +414,29 @@ export async function getActualsFromWoHref(
     }))
     .filter((x) => !!x.itemnum || x.itemqty > 0);
 
-  return { actualLabor, actualMaterials };
+  return { actualLabor, actualMaterials, mxwoDetailsHref };
 }
 
 // --------------------------
-// ✅ ACTUALS WRITE (MXWO ONLY) + returns AddActualResult with bodyText
+// ✅ ACTUALS POST (same as Postman) - FIXED + TS safe
 // --------------------------
-export type AddActualResult = {
-  status: number;
-  data: any;
-  bodyText: string;
-};
 
-function toBodyText(data: any): string {
-  if (data === undefined || data === null) return '';
-  if (typeof data === 'string') return data;
-  try {
-    return JSON.stringify(data);
-  } catch {
-    return String(data);
-  }
-}
-
-export async function addActualLabor(
-  woHref: string,
-  username: string,
-  password: string,
-  payload: { laborcode: string; regularhrs: number }
-): Promise<AddActualResult> {
-  const token = makeToken(username, password);
-
-  const fixedHref = normalizeOslcHref(woHref).replace(/\/+$/, '');
-  const url = `${fixedHref}?lean=1`; // ✅ IMPORTANT: use fixedHref
-
-  console.log('[addActualLabor] fixedHref:', fixedHref);
-  console.log('[addActualLabor] POST URL:', url);
-  console.log('[addActualLabor] url==fixed?', url.startsWith(fixedHref));
-
-  const res = await axios.post(
-    url,
-    {
-      labtrans_reporting: [
-        {
-          laborcode: String(payload.laborcode || '').trim(),
-          regularhrs: Number(payload.regularhrs || 0),
-        },
-      ],
-    },
-    {
-      headers: patchHeaders(token),
-      timeout: 30000,
-      validateStatus: () => true,
-    }
-  );
-
-  console.log('[addActualLabor] status:', res.status);
-
-  if (!(res.status === 204 || (res.status >= 200 && res.status < 300))) {
-    throw new Error(extractMaximoError(res));
-  }
-
-  return { status: res.status, data: res.data, bodyText: toBodyText(res.data) };
-}
-
+// 1) ✅ add actual material: MUST use matusetrans_reporting + PATCH override headers
 export async function addActualMaterial(
-  woHref: string,
+  woHref: string, // should be mxwoDetailsHref (sm_mxwodetails member href)
   username: string,
   password: string,
-  payload: { itemnum: string; quantity: number; storeloc: string; issuetype: string }
-): Promise<AddActualResult> {
+  payload: {
+    itemnum: string;
+    quantity: number;
+    storeloc: string;
+    issuetype: string; // "ISSUE"
+  }
+): Promise<void> {
   const token = makeToken(username, password);
 
-  const fixedHref = normalizeOslcHref(woHref).replace(/\/+$/, '');
-  const url = `${fixedHref}?lean=1`; // ✅ IMPORTANT: use fixedHref
-
-  console.log('[addActualMaterial] fixedHref:', fixedHref);
-  console.log('[addActualMaterial] POST URL:', url);
-  console.log('[addActualMaterial] url==fixed?', url.startsWith(fixedHref));
+  const fixedHref = rewriteMaximoUrl(woHref) || woHref;
+  const url = `${fixedHref}?lean=1`;
 
   const res = await axios.post(
     url,
@@ -491,13 +444,9 @@ export async function addActualMaterial(
       matusetrans_reporting: [
         {
           itemnum: payload.itemnum,
+          quantity: payload.quantity,
           storeloc: payload.storeloc,
           issuetype: payload.issuetype,
-
-          // quantity aliases (Maximo environments vary)
-          quantity: payload.quantity,
-          issueqty: payload.quantity,
-          itemqty: payload.quantity,
         },
       ],
     },
@@ -508,14 +457,47 @@ export async function addActualMaterial(
     }
   );
 
-  console.log('[addActualMaterial] status:', res.status);
-
+  // success: 204 No Content
   if (!(res.status === 204 || (res.status >= 200 && res.status < 300))) {
     throw new Error(extractMaximoError(res));
   }
-
-  return { status: res.status, data: res.data, bodyText: toBodyText(res.data) };
 }
+
+// 2) ✅ add actual labor: POST array to /labtrans (use same PATCH override headers)
+export async function addActualLabor(
+  woHref: string, // should be mxwoDetailsHref (sm_mxwodetails member href)
+  username: string,
+  password: string,
+  payload: {
+    laborcode: string;
+    regularhrs: number;
+  }
+): Promise<void> {
+  const token = makeToken(username, password);
+
+  const fixedHref = rewriteMaximoUrl(woHref) || woHref;
+  const url = `${fixedHref}/labtrans?lean=1`;
+
+  const res = await axios.post(
+    url,
+    [
+      {
+        laborcode: payload.laborcode,
+        regularhrs: payload.regularhrs,
+      },
+    ],
+    {
+      headers: patchHeaders(token),
+      timeout: 30000,
+      validateStatus: () => true,
+    }
+  );
+
+  if (!(res.status >= 200 && res.status < 300)) {
+    throw new Error(extractMaximoError(res));
+  }
+}
+
 // --------------------------
 // Work Order Details (base)
 // --------------------------
@@ -562,6 +544,7 @@ export async function getWorkOrderDetails(
     const res = await axios.get<MaximoResponse>(BASE_URL, {
       headers: {
         MAXAUTH: token,
+        Authorization: `Basic ${token}`,
         Accept: 'application/json',
         properties: '*',
         'Cache-Control': 'no-cache',
@@ -602,7 +585,7 @@ export async function getWorkOrderDetails(
       wonum: item.wonum ?? wonum,
       barcode: item.wonum ?? wonum,
 
-      href: normalizeOslcHref(safeTrim((item as any)?.href)) || undefined,
+      href: safeTrim((item as any)?.href) || undefined,
 
       description: item.description ?? '',
       details: '',
@@ -634,7 +617,7 @@ export async function getWorkOrderDetails(
       activities: activitiesRaw.map((a: any) => {
         const status = String(a?.status ?? '');
         return {
-          href: normalizeOslcHref(safeTrim(a?.href)) || undefined,
+          href: safeTrim(a?.href) || undefined,
           taskid: String(a?.taskid ?? ''),
           description: a?.description ?? '',
           labhrs: parseLabHrs(a?.labhrs),

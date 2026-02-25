@@ -449,14 +449,15 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
                         }
 
                         if (category.key === 'Work log') {
-                          const ref = safeTrim((details as any).worklog_collectionref || '');
-                          if (!ref) {
-                            Alert.alert('Erreur', 'worklog_collectionref manquant');
+                          const hrefToSend = cleanWoHref || rawHref || String((details as any)?.href ?? '').trim();
+                          if (!hrefToSend) {
+                            Alert.alert('Erreur', 'href OT manquant');
                             return;
                           }
-                          navigation.navigate('AddWorkLog' as any, {
-                            worklogCollectionRef: ref,
+
+                          navigation.navigate('AddWorkLog', {
                             wonum: details.wonum,
+                            woHref: (details as any).woHrefForWorklog || details.href,
                           });
                           return;
                         }

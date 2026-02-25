@@ -79,12 +79,17 @@ export type RootStackParamList = {
   DetailsWorkLog: { workOrder: WorkOrder };
 
   AddWorkLog: {
-    wonum: string;
-    siteid?: string;
-    workorderid?: number | string;
-    mxwoDetailsHref?: string;
-    worklogCollectionRef?: string;
-  };
+  wonum: string;
+  siteid?: string;
+  workorderid?: number | string;
+
+  // ✅ NEW (what AddWorkLogScreen needs)
+  woHref?: string;
+
+  // keep if used elsewhere
+  mxwoDetailsHref?: string;
+  worklogCollectionRef?: string;
+};
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();

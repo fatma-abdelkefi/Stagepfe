@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal } from 'react-native';
+import React, { useMemo, useState, useCallback } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { RouteProp } from '@react-navigation/native';
 import { useNavigation } from '@react-navigation/native';
@@ -7,6 +7,8 @@ import FeatherIcon from 'react-native-vector-icons/Feather';
 
 import DetailsHeader from '../ui/details/DetailsHeader';
 import { detailsStyles } from '../ui/details/detailsStyles';
+import { useAuth } from '../context/AuthContext';
+import { getWorkLogByLocalRef } from '../services/worklogService';
 
 type RootStackParamList = any;
 type Props = { route: RouteProp<RootStackParamList, 'DetailsWorkLog'> };
@@ -14,14 +16,21 @@ type Props = { route: RouteProp<RootStackParamList, 'DetailsWorkLog'> };
 function fixHost(url: string) {
   return String(url || '').replace('http://192.168.1.202:9080', 'http://demo2.smartech-tn.com');
 }
+
 function formatDate(s?: string) {
   if (!s) return '-';
   return String(s).replace('T', ' ').replace(/:\d{2}\+\d{2}:\d{2}$/, '');
 }
 
+function extractLongText(wl: any) {
+  return wl?.description_longdescription?.ldtext ?? wl?.description_longdescription ?? '';
+}
+
 export default function DetailsWorkLogScreen({ route }: Props) {
   const navigation = useNavigation<any>();
   const workOrder = (route as any)?.params?.workOrder;
+
+  const { username, password, authLoading } = useAuth();
 
   const worklogs = useMemo(() => {
     const arr = (workOrder as any)?.workLogs ?? (workOrder as any)?.worklog ?? [];
@@ -29,12 +38,60 @@ export default function DetailsWorkLogScreen({ route }: Props) {
   }, [workOrder]);
 
   const [selected, setSelected] = useState<any>(null);
+  const [loadingSelected, setLoadingSelected] = useState(false);
+
+  const openWorklog = useCallback(
+    async (wl: any) => {
+      // open immediately (fast UI)
+      const longText = extractLongText(wl);
+      setSelected({ ...wl, _longText: longText });
+
+      // if already has fields, do nothing
+      const hasDesc = !!String(wl?.description || '').trim();
+      const hasCreateBy = !!String(wl?.createby || '').trim();
+      const hasCreateDate = !!String(wl?.createdate || '').trim();
+      const hasLong = !!String(longText || '').trim();
+
+      if (hasDesc && hasCreateBy && hasCreateDate && hasLong) return;
+
+      // need localref to fetch full row
+      const localref = String(wl?.localref || '').trim();
+      if (!localref) return;
+
+      if (authLoading || !username || !password) {
+        Alert.alert('Session', 'Veuillez vous connecter.');
+        return;
+      }
+
+      setLoadingSelected(true);
+      try {
+        const full = await getWorkLogByLocalRef({ localref, username, password });
+        if (!full) return;
+
+        const fullLong = extractLongText(full);
+
+        setSelected((prev: any) => ({
+          ...(prev || {}),
+          ...(full || {}),
+          _longText: fullLong,
+        }));
+      } catch (e: any) {
+        console.log('[WORKLOG] localref fetch error:', e?.message || e);
+      } finally {
+        setLoadingSelected(false);
+      }
+    },
+    [authLoading, username, password]
+  );
 
   return (
     <SafeAreaView style={detailsStyles.container}>
       <DetailsHeader title="Work Log" subtitle={`OT #${workOrder?.wonum ?? '-'}`} />
 
-      <ScrollView contentContainerStyle={[detailsStyles.content, { paddingBottom: 24 }]} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[detailsStyles.content, { paddingBottom: 24 }]}
+        showsVerticalScrollIndicator={false}
+      >
         {worklogs.length === 0 ? (
           <View style={detailsStyles.emptyContainer}>
             <FeatherIcon name="message-square" size={40} color="#cbd5e1" />
@@ -43,14 +100,14 @@ export default function DetailsWorkLogScreen({ route }: Props) {
         ) : (
           worklogs.map((wl: any) => {
             const summary = wl?.description || '—';
-            const longText = wl?.description_longdescription?.ldtext ?? wl?.description_longdescription ?? '';
+            const longText = extractLongText(wl);
             const hasLong = !!String(longText || '').trim();
 
             return (
               <TouchableOpacity
-                key={String(wl?.worklogid ?? wl?.localref ?? `${wl?.createdate ?? ''}-${Math.random()}`)}
+                key={String(wl?.worklogid ?? wl?.localref ?? wl?.href ?? wl?.createdate ?? '')}
                 activeOpacity={0.85}
-                onPress={() => setSelected({ ...wl, _longText: longText })}
+                onPress={() => openWorklog(wl)}
                 style={styles.card}
               >
                 <View style={styles.cardTop}>
@@ -96,6 +153,14 @@ export default function DetailsWorkLogScreen({ route }: Props) {
               </TouchableOpacity>
             </View>
 
+            {/* ✅ Loading indicator when fetching full row */}
+            {loadingSelected ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10 }}>
+                <ActivityIndicator />
+                <Text style={{ fontSize: 12, fontWeight: '800', color: '#334155' }}>Chargement détails...</Text>
+              </View>
+            ) : null}
+
             <View style={styles.modalMeta}>
               <Text style={styles.modalMetaText}>
                 <Text style={styles.modalMetaLabel}>Créé par:</Text> {selected?.createby || '—'}
@@ -104,34 +169,22 @@ export default function DetailsWorkLogScreen({ route }: Props) {
                 <Text style={styles.modalMetaLabel}>Date:</Text> {formatDate(selected?.createdate)}
               </Text>
               <Text style={styles.modalMetaText}>
-                <Text style={styles.modalMetaLabel}>Type:</Text> {selected?.logtype_description || selected?.logtype || '—'}
-              </Text>
-              <Text style={styles.modalMetaText}>
-                <Text style={styles.modalMetaLabel}>ID:</Text> {String(selected?.worklogid ?? '—')}
+                <Text style={styles.modalMetaLabel}>Type:</Text>{' '}
+                {selected?.logtype_description || selected?.logtype || '—'}
               </Text>
             </View>
 
-            <Text style={styles.modalSection}>Summary</Text>
+            <Text style={styles.modalSection}>descriprion</Text>
             <View style={styles.textBox}>
               <Text style={styles.textBoxText}>{selected?.description || '—'}</Text>
             </View>
 
-            <Text style={styles.modalSection}>Details</Text>
+            <Text style={styles.modalSection}>Détails</Text>
             <View style={[styles.textBox, { minHeight: 120 }]}>
-              <Text style={styles.textBoxText}>{String(selected?._longText || '').trim() ? selected?._longText : '—'}</Text>
+              <Text style={styles.textBoxText}>
+                {String(selected?._longText || '').trim() ? selected?._longText : '—'}
+              </Text>
             </View>
-
-            {!!selected?.localref && (
-              <TouchableOpacity
-                onPress={() => setSelected((prev: any) => ({ ...prev, _showRef: !prev?._showRef }))}
-                style={styles.debugBtn}
-              >
-                <FeatherIcon name="link" size={14} color="#2563eb" />
-                <Text style={styles.debugBtnText}>Voir localref</Text>
-              </TouchableOpacity>
-            )}
-
-            {!!selected?._showRef && <Text style={styles.refText} selectable>{fixHost(selected?.localref)}</Text>}
           </View>
         </View>
       </Modal>
@@ -177,18 +230,38 @@ const styles = StyleSheet.create({
   pillWarn: { backgroundColor: '#fee2e2' },
   pillText: { fontSize: 12, fontWeight: '900', color: '#0f172a' },
 
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.55)', alignItems: 'center', justifyContent: 'center', padding: 16 },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+  },
   modalCard: { width: '100%', maxWidth: 520, backgroundColor: '#fff', borderRadius: 18, padding: 14 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   modalTitle: { fontSize: 16, fontWeight: '900', color: '#0f172a' },
-  closeBtn: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center' },
+  closeBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#f1f5f9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   modalMeta: { marginTop: 10, gap: 4 },
   modalMetaText: { fontSize: 12, color: '#334155', fontWeight: '700' },
   modalMetaLabel: { color: '#64748b' },
 
   modalSection: { marginTop: 14, fontSize: 13, fontWeight: '900', color: '#0f172a' },
-  textBox: { marginTop: 8, backgroundColor: '#f8fafc', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#e2e8f0' },
+  textBox: {
+    marginTop: 8,
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
   textBoxText: { fontSize: 13, color: '#0f172a', fontWeight: '600', lineHeight: 18 },
 
   debugBtn: { marginTop: 10, flexDirection: 'row', gap: 8, alignItems: 'center', alignSelf: 'flex-start' },
