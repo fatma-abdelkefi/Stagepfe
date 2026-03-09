@@ -24,7 +24,9 @@ import StatusChangeModal from '../components/StatusChangeModal';
 import { rewriteMaximoUrl } from '../services/rewriteMaximoUrl';
 
 type Props = { route: RouteProp<RootStackParamList, 'WorkOrderDetails'> };
-type NavProp = NativeStackNavigationProp<RootStackParamList, 'WorkOrderDetails'>;
+
+// ✅ IMPORTANT: navigation must be typed for the whole stack
+type NavProp = NativeStackNavigationProp<RootStackParamList>;
 
 const CATEGORIES = [
   { key: 'Activités', icon: 'list', gradient: ['#124aa5', '#0b4bd4'] },
@@ -33,7 +35,7 @@ const CATEGORIES = [
   { key: "Main d'œuvre réelle", icon: 'user-check', gradient: ['#005ed1', '#0ea5e9'] },
   { key: 'Matériel planifié', icon: 'package', gradient: ['#93c5fd', '#3b82f6'] },
   { key: 'Matériel réel', icon: 'clipboard', gradient: ['#005ed1', '#0ea5e9'] },
-  { key: 'Work log', icon: 'clock', gradient: ['#7c3aed', '#4f46e5'] },
+  { key: 'Work log', icon: 'clock', gradient: ['#124aa5', '#93c5fd'] },
 ];
 
 function clamp(n: number, min: number, max: number) {
@@ -187,7 +189,9 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#3b82f6" />
-        <Text style={styles.loadingText}>{authLoading ? 'Vérification session...' : 'Chargement...'}</Text>
+        <Text style={styles.loadingText}>
+          {authLoading ? 'Vérification session...' : 'Chargement...'}
+        </Text>
       </View>
     );
   }
@@ -216,262 +220,289 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
 
   // ── Main render ─────────────────────────────────────────────────────────────
 
+  const assetCode = safeTrim((details as any).asset || '');
+  const assetDesc = safeTrim((details as any).assetDescription || (details as any).asset_description || '');
+  const locCode = safeTrim((details as any).location || '');
+  const locDesc = safeTrim((details as any).locationDescription || (details as any).location_description || '');
+
   return (
     <SafeAreaView style={styles.container}>
-      <LinearGradient
-        colors={['#3b82f6', '#2563eb', '#1e40af']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={[
-          styles.header,
-          { paddingHorizontal: layout.sidePadding, paddingTop: Platform.OS === 'android' ? 10 : 12 },
-        ]}
-      >
-        <View style={styles.headerTop}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <FeatherIcon name="arrow-left" size={20} color="#fff" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Détails OT</Text>
-          <View style={styles.backButton} />
-        </View>
+      {/* ✅ Header NOT fixed anymore: it's inside the same ScrollView */}
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
+        <LinearGradient
+          colors={['#3b82f6', '#2563eb', '#1e40af']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={[
+            styles.header,
+            {
+              paddingHorizontal: layout.sidePadding,
+              paddingTop: Platform.OS === 'android' ? 6 : 8, // ✅ smaller
+            },
+          ]}
+        >
+          <View style={styles.headerTop}>
+            {/* ✅ Changed icon + smaller button */}
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} activeOpacity={0.8}>
+              <FeatherIcon name="chevron-left" size={24} color="#fff" />
+            </TouchableOpacity>
 
-        <View style={styles.woCard}>
-          <View style={styles.woHeader}>
-            <View>
-              <Text style={styles.woLabel}>Ordre de travail</Text>
-              <Text style={styles.woNumber}>#{details.wonum}</Text>
-            </View>
+            <Text style={styles.headerTitle}>Détails OT</Text>
 
-            <View style={styles.badgesRow}>
-              {details.isUrgent && !details.completed && (
-                <View style={[styles.statusBadge, { backgroundColor: '#fee2e2' }]}>
-                  <FeatherIcon name="alert-circle" size={14} color="#dc2626" />
-                  <Text style={[styles.statusBadgeText, { color: '#dc2626' }]}>Urgent</Text>
-                </View>
-              )}
-
-              {details.completed && (
-                <View style={[styles.statusBadge, { backgroundColor: '#dbeafe' }]}>
-                  <FeatherIcon name="check-circle" size={14} color="#2563eb" />
-                  <Text style={[styles.statusBadgeText, { color: '#2563eb' }]}>Terminé</Text>
-                </View>
-              )}
-
-              {statusLocked ? (
-                <View style={styles.statusReadOnly}>
-                  <FeatherIcon name="lock" size={13} color="#2563eb" />
-                  <Text style={styles.statusReadOnlyText}>{currentStatusLabel || currentStatus || '-'}</Text>
-                </View>
-              ) : (
-                <TouchableOpacity onPress={onPressStatus} style={styles.statusChangeBtn} activeOpacity={0.8}>
-                  <FeatherIcon name="refresh-cw" size={13} color="#2563eb" />
-                  <Text style={styles.statusChangeBtnText}>{currentStatusLabel || currentStatus || '-'}</Text>
-                  <FeatherIcon name="chevron-down" size={13} color="#2563eb" />
-                </TouchableOpacity>
-              )}
-            </View>
+            {/* ✅ Removed right square (no carré) – just invisible spacer */}
+            <View style={styles.headerRightSpacer} />
           </View>
 
-          <Text style={styles.description}>{details.description || 'Aucune description'}</Text>
-
-          <View style={styles.infoGrid}>
-            <View style={styles.infoItem}>
-              <FeatherIcon name="tool" size={16} color="#3b82f6" />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.infoLabel}>Actif</Text>
-                <Text style={styles.infoValue} numberOfLines={1}>
-                  {(details as any).asset || '-'}
-                </Text>
+          <View style={styles.woCard}>
+            <View style={styles.woHeader}>
+              <View>
+                <Text style={styles.woLabel}>Ordre de travail</Text>
+                <Text style={styles.woNumber}>#{details.wonum}</Text>
               </View>
-            </View>
 
-            <View style={styles.infoItem}>
-              <FeatherIcon name="map-pin" size={16} color="#3b82f6" />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.infoLabel}>Emplacement</Text>
-                <Text style={styles.infoValue} numberOfLines={1}>
-                  {(details as any).location || '-'}
-                </Text>
-              </View>
-            </View>
-          </View>
+              <View style={styles.badgesRow}>
+                {details.isUrgent && !details.completed && (
+                  <View style={[styles.statusBadge, { backgroundColor: '#fee2e2' }]}>
+                    <FeatherIcon name="alert-circle" size={14} color="#dc2626" />
+                    <Text style={[styles.statusBadgeText, { color: '#dc2626' }]}>Urgent</Text>
+                  </View>
+                )}
 
-          <View style={styles.infoGrid}>
-            <View style={styles.infoItem}>
-              <FeatherIcon name="calendar" size={16} color="#3b82f6" />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.infoLabel}>Début prévu</Text>
-                <Text style={styles.infoValue} numberOfLines={1}>
-                  {details.scheduledStart ? String(details.scheduledStart) : '-'}
-                </Text>
-              </View>
-            </View>
+                {details.completed && (
+                  <View style={[styles.statusBadge, { backgroundColor: '#dbeafe' }]}>
+                    <FeatherIcon name="check-circle" size={14} color="#2563eb" />
+                    <Text style={[styles.statusBadgeText, { color: '#2563eb' }]}>Terminé</Text>
+                  </View>
+                )}
 
-            <View style={styles.infoItem}>
-              <FeatherIcon name="check-square" size={16} color="#3b82f6" />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.infoLabel}>Fin prévue</Text>
-                <Text style={styles.infoValue} numberOfLines={1}>
-                  {(details as any).actualFinish ? String((details as any).actualFinish) : '-'}
-                </Text>
-              </View>
-            </View>
-          </View>
-        </View>
-      </LinearGradient>
-
-      <ScrollView
-        style={styles.content}
-        contentContainerStyle={{ paddingHorizontal: layout.sidePadding, paddingTop: 18 }}
-        showsVerticalScrollIndicator={false}
-      >
-        <Text style={styles.sectionTitle}>Catégories</Text>
-
-        <View style={[styles.categoryGrid, { columnGap: layout.gap, rowGap: layout.gap }]}>
-          {CATEGORIES.map((category) => {
-            const count = getCategoryCount(category.key);
-
-            return (
-              <TouchableOpacity
-                key={category.key}
-                style={[styles.categoryCard, { width: layout.cardWidth, height: layout.cardHeight }]}
-                activeOpacity={0.8}
-                onPress={() => {
-                  if (category.key === 'Activités') navigation.navigate('DetailsActivities', { workOrder: details });
-                  else if (category.key === 'Documents') navigation.navigate('DetailsDocuments', { workOrder: details });
-                  else if (category.key === "Main d'œuvre planifiée")
-                    navigation.navigate('DetailsLabor', { workOrder: details });
-                  else if (category.key === "Main d'œuvre réelle")
-                    navigation.navigate('DetailsActualLabor', { workOrder: details });
-                  else if (category.key === 'Matériel planifié')
-                    navigation.navigate('DetailsMaterials', { workOrder: details });
-                  else if (category.key === 'Matériel réel')
-                    navigation.navigate('DetailsActualMaterials', { workOrder: details });
-                  else if (category.key === 'Work log')
-                    navigation.navigate('DetailsWorkLog' as any, { workOrder: details });
-                }}
-              >
-                <LinearGradient
-                  colors={category.gradient as any}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.categoryGradient}
-                >
-                  <View>
-                    <View style={styles.categoryIconContainer}>
-                      <FeatherIcon name={category.icon as any} size={32} color="#fff" />
-                    </View>
-                    <Text style={styles.categoryName} numberOfLines={2}>
-                      {category.key}
+                {statusLocked ? (
+                  <View style={styles.statusReadOnly}>
+                    <FeatherIcon name="lock" size={13} color="#2563eb" />
+                    <Text style={styles.statusReadOnlyText}>
+                      {currentStatusLabel || currentStatus || '-'}
                     </Text>
                   </View>
+                ) : (
+                  <TouchableOpacity onPress={onPressStatus} style={styles.statusChangeBtn} activeOpacity={0.8}>
+                    <FeatherIcon name="refresh-cw" size={13} color="#2563eb" />
+                    <Text style={styles.statusChangeBtnText}>
+                      {currentStatusLabel || currentStatus || '-'}
+                    </Text>
+                    <FeatherIcon name="chevron-down" size={13} color="#2563eb" />
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
 
-                  <View style={styles.categoryCount}>
-                    <Text style={styles.categoryCountText}>{count}</Text>
-                  </View>
+            <Text style={styles.description}>{details.description || 'Aucune description'}</Text>
 
-                  {(category.key === "Main d'œuvre réelle" ||
-                    category.key === 'Matériel réel' ||
-                    category.key === "Main d'œuvre planifiée" ||
-                    category.key === 'Matériel planifié' ||
-                    category.key === 'Documents' ||
-                    category.key === 'Work log') && (
-                    <TouchableOpacity
-                      onPress={(e) => {
-                        e.stopPropagation();
+            <View style={styles.infoGrid}>
+              <View style={styles.infoItem}>
+                <FeatherIcon name="tool" size={15} color="#3b82f6" />
+                <View style={styles.infoTextWrap}>
+                  <Text style={styles.infoValue}>
+                    {assetCode ? assetCode : 'Non renseigné'}
+                  </Text>
+                  <Text style={styles.infoSubValue}>
+                    {assetDesc ? assetDesc : 'Aucune description'}
+                  </Text>
+                </View>
+              </View>
 
-                        if (category.key === 'Matériel réel') {
-                          const hrefToSend =
-                            cleanWoHref || rawHref || String((details as any)?.href ?? '').trim();
+              <View style={styles.infoItem}>
+                <FeatherIcon name="map-pin" size={15} color="#3b82f6" />
+                <View style={styles.infoTextWrap}>
+                  <Text style={styles.infoValue}>
+                    {locCode ? locCode : 'Emplacement non renseigné'}
+                  </Text>
+                  <Text style={styles.infoSubValue}>
+                    {locDesc ? locDesc : 'Aucune description'}
+                  </Text>
+                </View>
+              </View>
+            </View>
 
-                          if (!hrefToSend) {
-                            Alert.alert('Erreur', 'href OT manquant');
+            <View style={styles.infoGrid}>
+              <View style={styles.infoItem}>
+                <FeatherIcon name="calendar" size={15} color="#3b82f6" />
+                <View style={styles.infoTextWrap}>
+                  <Text style={styles.infoLabel}>Début prévu</Text>
+                  <Text style={styles.infoValue}>
+                    {details.scheduledStart ? String(details.scheduledStart) : 'Non planifié'}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.infoItem}>
+                <FeatherIcon name="check-square" size={15} color="#3b82f6" />
+                <View style={styles.infoTextWrap}>
+                  <Text style={styles.infoLabel}>Fin prévue</Text>
+                  <Text style={styles.infoValue}>
+                    {(details as any).actualFinish ? String((details as any).actualFinish) : 'Non planifié'}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          </View>
+        </LinearGradient>
+
+        {/* ✅ Content continues below header, all scrolling together */}
+        <View style={{ paddingHorizontal: layout.sidePadding, paddingTop: 18 }}>
+          <Text style={styles.sectionTitle}>Catégories</Text>
+
+          <View style={[styles.categoryGrid, { columnGap: layout.gap, rowGap: layout.gap }]}>
+            {CATEGORIES.map((category) => {
+              const count = getCategoryCount(category.key);
+
+              return (
+                <TouchableOpacity
+                  key={category.key}
+                  style={[styles.categoryCard, { width: layout.cardWidth, height: layout.cardHeight }]}
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    if (category.key === 'Activités') {
+                      navigation.navigate('DetailsActivities', { workOrder: details });
+                    } else if (category.key === 'Documents') {
+                      navigation.navigate('DetailsDocuments', { workOrder: details });
+                    } else if (category.key === "Main d'œuvre planifiée") {
+                      navigation.navigate('DetailsLabor', { workOrder: details });
+                    } else if (category.key === "Main d'œuvre réelle") {
+                      const hrefToSend = cleanWoHref || rawHref || String((details as any)?.href ?? '').trim();
+                      navigation.navigate('DetailsActualLabor', {
+                        workOrder: details,
+                        woHref: hrefToSend,
+                      });
+                    } else if (category.key === 'Matériel planifié') {
+                      navigation.navigate('DetailsMaterials', { workOrder: details });
+                    } else if (category.key === 'Matériel réel') {
+                      const hrefToSend = cleanWoHref || rawHref || String((details as any)?.href ?? '').trim();
+                      navigation.navigate('DetailsActualMaterials', {
+                        workOrder: details,
+                        woHref: hrefToSend,
+                      });
+                    } else if (category.key === 'Work log') {
+                      navigation.navigate('DetailsWorkLog', { workOrder: details });
+                    }
+                  }}
+                >
+                  <LinearGradient
+                    colors={category.gradient as any}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.categoryGradient}
+                  >
+                    <View>
+                      <View style={styles.categoryIconContainer}>
+                        <FeatherIcon name={category.icon as any} size={32} color="#fff" />
+                      </View>
+                      <Text style={styles.categoryName} numberOfLines={2}>
+                        {category.key}
+                      </Text>
+                    </View>
+
+                    <View style={styles.categoryCount}>
+                      <Text style={styles.categoryCountText}>{count}</Text>
+                    </View>
+
+                    {(category.key === "Main d'œuvre réelle" ||
+                      category.key === 'Matériel réel' ||
+                      category.key === "Main d'œuvre planifiée" ||
+                      category.key === 'Matériel planifié' ||
+                      category.key === 'Documents' ||
+                      category.key === 'Work log') && (
+                      <TouchableOpacity
+                        onPress={(e) => {
+                          e.stopPropagation();
+
+                          if (category.key === 'Matériel réel') {
+                            const hrefToSend = cleanWoHref || rawHref || String((details as any)?.href ?? '').trim();
+                            if (!hrefToSend) {
+                              Alert.alert('Erreur', 'href OT manquant');
+                              return;
+                            }
+
+                            navigation.navigate('AddActualMaterial' as any, {
+                              wonum: details.wonum,
+                              siteid: details.siteid,
+                              woHref: hrefToSend,
+                            });
                             return;
                           }
 
-                          navigation.navigate('AddActualMaterial' as any, {
-                            wonum: details.wonum,
-                            siteid: details.siteid,
-                            woHref: hrefToSend,
-                          });
-                          return;
-                  }
-                        if (category.key === "Main d'œuvre réelle") {
-                          const hrefToSend =
-                            cleanWoHref || rawHref || String((details as any)?.href ?? '').trim();
+                          if (category.key === "Main d'œuvre réelle") {
+                            const hrefToSend = cleanWoHref || rawHref || String((details as any)?.href ?? '').trim();
+                            if (!hrefToSend) {
+                              Alert.alert('Erreur', 'href OT manquant');
+                              return;
+                            }
 
-                          if (!hrefToSend) {
-                            Alert.alert('Erreur', 'href OT manquant');
+                            navigation.navigate('AddActualLabor' as any, {
+                              wonum: details.wonum,
+                              siteid: details.siteid,
+                              woHref: hrefToSend,
+                            });
                             return;
                           }
 
-                          navigation.navigate('AddActualLabor' as any, {
-                            wonum: details.wonum,
-                            siteid: details.siteid,
-                            woHref: hrefToSend,
-                          });
-                          return;
-                        }
-
-                        if (category.key === 'Matériel planifié') {
-                          navigation.navigate('AddMaterial', {
-                            wonum: details.wonum,
-                            workorderid: details.workorderid,
-                            siteid: details.siteid,
-                            status: details.status,
-                            ishistory: (details as any).ishistory,
-                          });
-                          return;
-                        }
-
-                        if (category.key === "Main d'œuvre planifiée") {
-                          if (!details.workorderid || !details.siteid) {
-                            Alert.alert('Erreur', 'workorderid / siteid manquant');
-                            return;
-                          }
-                          navigation.navigate('AddLabor', {
-                            workorderid: details.workorderid,
-                            siteid: details.siteid,
-                          });
-                          return;
-                        }
-
-                        if (category.key === 'Documents') {
-                          if (!details.workorderid || !details.siteid) {
-                            Alert.alert('Erreur', 'workorderid / siteid manquant');
-                            return;
-                          }
-                          navigation.navigate('AddDoclink', {
-                            ownerid: details.workorderid,
-                            siteid: details.siteid,
-                          });
-                          return;
-                        }
-
-                        if (category.key === 'Work log') {
-                          const hrefToSend = cleanWoHref || rawHref || String((details as any)?.href ?? '').trim();
-                          if (!hrefToSend) {
-                            Alert.alert('Erreur', 'href OT manquant');
+                          if (category.key === 'Matériel planifié') {
+                            navigation.navigate('AddMaterial', {
+                              wonum: details.wonum,
+                              workorderid: details.workorderid,
+                              siteid: details.siteid,
+                              status: details.status,
+                              ishistory: (details as any).ishistory,
+                            });
                             return;
                           }
 
-                          navigation.navigate('AddWorkLog', {
-                            wonum: details.wonum,
-                            woHref: (details as any).woHrefForWorklog || details.href,
-                          });
-                          return;
-                        }
-                      }}
-                      style={styles.plusButton}
-                      activeOpacity={0.85}
-                    >
-                      <FeatherIcon name="plus" size={20} color="#fff" />
-                    </TouchableOpacity>
-                  )}
-                </LinearGradient>
-              </TouchableOpacity>
-            );
-          })}
+                          if (category.key === "Main d'œuvre planifiée") {
+                            if (!details.workorderid || !details.siteid) {
+                              Alert.alert('Erreur', 'workorderid / siteid manquant');
+                              return;
+                            }
+                            navigation.navigate('AddLabor', {
+                              workorderid: details.workorderid,
+                              siteid: details.siteid,
+                            });
+                            return;
+                          }
+
+                          if (category.key === 'Documents') {
+                            if (!details.workorderid || !details.siteid) {
+                              Alert.alert('Erreur', 'workorderid / siteid manquant');
+                              return;
+                            }
+                            navigation.navigate('AddDoclink', {
+                              ownerid: details.workorderid,
+                              siteid: details.siteid,
+                            });
+                            return;
+                          }
+
+                          if (category.key === 'Work log') {
+                            const ref = safeTrim((details as any).worklog_collectionref || '');
+                            if (!ref) {
+                              Alert.alert('Erreur', 'worklog_collectionref manquant');
+                              return;
+                            }
+                            navigation.navigate('AddWorkLog', {
+                              worklogCollectionRef: ref,
+                              wonum: details.wonum,
+                            });
+                            return;
+                          }
+                        }}
+                        style={styles.plusButton}
+                        activeOpacity={0.85}
+                      >
+                        <FeatherIcon name="plus" size={20} color="#fff" />
+                      </TouchableOpacity>
+                    )}
+                  </LinearGradient>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
         </View>
       </ScrollView>
 
@@ -532,43 +563,48 @@ const styles = StyleSheet.create({
   },
   retryButtonText: { fontSize: 16, fontWeight: '700', color: '#fff' },
 
+  // ✅ smaller header
   header: {
-    paddingBottom: 20,
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
+    paddingBottom: 9, // smaller
+    borderBottomLeftRadius: 18,
+    borderBottomRightRadius: 18,
   },
   headerTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 4, // smaller
   },
   backButton: {
-    width: 44,
-    height: 44,
+    width: 32,
+    height: 32,
     backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 12,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerTitle: { fontSize: 18, fontWeight: '700', color: '#fff' },
+  headerRightSpacer: {
+    width: 32,
+    height: 32,
+  },
+  headerTitle: { fontSize: 15, fontWeight: '700', color: '#fff' },
 
   woCard: {
     backgroundColor: 'rgba(255,255,255,0.98)',
     borderRadius: 10,
     padding: 10,
-    marginBottom: 8,
+    marginBottom: 6,
   },
   woHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 12,
+    marginBottom: 10,
     flexWrap: 'wrap',
     gap: 8,
   },
   woLabel: { fontSize: 12, color: '#64748b', fontWeight: '600' },
-  woNumber: { fontSize: 20, fontWeight: '800', color: '#3b82f6', marginTop: 2 },
+  woNumber: { fontSize: 18, fontWeight: '800', color: '#3b82f6', marginTop: 2 },
 
   badgesRow: {
     flexDirection: 'row',
@@ -618,7 +654,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#0f172a',
     lineHeight: 22,
-    marginBottom: 16,
+    marginBottom: 12,
   },
 
   infoGrid: { flexDirection: 'row', gap: 12, marginBottom: 12 },
@@ -630,15 +666,33 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8fafc',
     padding: 10,
     borderRadius: 10,
+    minWidth: 0,
   },
-  infoLabel: { fontSize: 12, color: '#64748b' },
-  infoValue: { fontSize: 14, fontWeight: '600', color: '#0f172a' },
+  infoTextWrap: { flex: 1, minWidth: 0 },
 
-  content: { flex: 1 },
+  // ✅ smaller words here
+  infoLabel: { fontSize: 11, color: '#64748b' },
+  infoValue: {
+    fontSize: 12, // smaller
+    fontWeight: '700',
+    color: '#0f172a',
+    flexShrink: 1,
+    flexWrap: 'wrap',
+  },
+  infoSubValue: {
+    marginTop: 1,
+    fontSize: 10, // smaller
+    fontWeight: '500',
+    color: '#64748b',
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    lineHeight: 15,
+  },
+
   sectionTitle: { fontSize: 20, fontWeight: '800', color: '#0f172a', marginBottom: 16 },
 
   categoryGrid: { flexDirection: 'row', flexWrap: 'wrap' },
-  categoryCard: { borderRadius: 20, overflow: 'hidden' },
+  categoryCard: { borderRadius: 30, overflow: 'hidden' },
   categoryGradient: {
     flex: 1,
     padding: 20,
@@ -649,25 +703,25 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 16,
     right: 16,
-    width: 36,
-    height: 36,
+    width: 30,
+    height: 30,
     borderRadius: 18,
     backgroundColor: 'rgba(255,255,255,0.3)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   categoryIconContainer: {
-    width: 56,
-    height: 56,
-    borderRadius: 16,
+    width: 30,
+    height: 40,
+    borderRadius: 14,
     backgroundColor: 'rgba(255,255,255,0.2)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  categoryName: { fontSize: 16, fontWeight: '700', color: '#fff', marginTop: 12 },
+  categoryName: { fontSize: 14, fontWeight: '700', color: '#fff', marginTop: 12 },
   categoryCount: {
     position: 'absolute',
-    top: 16,
+    top: 10,
     right: 16,
     backgroundColor: 'rgba(255,255,255,0.3)',
     paddingHorizontal: 10,

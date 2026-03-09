@@ -1,9 +1,21 @@
+// src/screens/DetailsWorkLogScreen.tsx
 import React, { useMemo, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, ActivityIndicator, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Modal,
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  FlatList,
+  ScrollView,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { RouteProp } from '@react-navigation/native';
-import { useNavigation } from '@react-navigation/native';
 import FeatherIcon from 'react-native-vector-icons/Feather';
+import { WebView } from 'react-native-webview';
 
 import DetailsHeader from '../ui/details/DetailsHeader';
 import { detailsStyles } from '../ui/details/detailsStyles';
@@ -13,40 +25,90 @@ import { getWorkLogByLocalRef } from '../services/worklogService';
 type RootStackParamList = any;
 type Props = { route: RouteProp<RootStackParamList, 'DetailsWorkLog'> };
 
-function fixHost(url: string) {
-  return String(url || '').replace('http://192.168.1.202:9080', 'http://demo2.smartech-tn.com');
-}
-
 function formatDate(s?: string) {
   if (!s) return '-';
-  return String(s).replace('T', ' ').replace(/:\d{2}\+\d{2}:\d{2}$/, '');
+
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return String(s);
+
+  const pad = (n: number) => String(n).padStart(2, '0');
+
+  const day = pad(d.getDate());
+  const month = pad(d.getMonth() + 1);
+  const year = d.getFullYear();
+  const hours = pad(d.getHours());
+  const minutes = pad(d.getMinutes());
+
+  return `${day}/${month}/${year} ${hours}:${minutes}`;
 }
 
 function extractLongText(wl: any) {
   return wl?.description_longdescription?.ldtext ?? wl?.description_longdescription ?? '';
 }
 
-export default function DetailsWorkLogScreen({ route }: Props) {
-  const navigation = useNavigation<any>();
-  const workOrder = (route as any)?.params?.workOrder;
+function buildHtmlPreview(html: string) {
+  return `
+  <!DOCTYPE html>
+  <html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      body {
+        margin: 0;
+        padding: 10px;
+        font-family: Arial, sans-serif;
+        color: #0f172a;
+        font-size: 14px;
+        line-height: 1.5;
+        background: #fff;
+      }
+      p { margin: 0 0 10px 0; }
+      ul, ol { padding-left: 20px; }
+      blockquote {
+        margin: 8px 0;
+        padding-left: 12px;
+        border-left: 3px solid #cbd5e1;
+        color: #475569;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      a {
+        color: #2563eb;
+      }
+    </style>
+  </head>
+  <body>${html || '—'}</body>
+  </html>
+  `;
+}
 
+export default function DetailsWorkLogScreen({ route }: Props) {
+  const workOrder = (route as any)?.params?.workOrder;
   const { username, password, authLoading } = useAuth();
 
   const worklogs = useMemo(() => {
     const arr = (workOrder as any)?.workLogs ?? (workOrder as any)?.worklog ?? [];
-    return [...arr].sort((a: any, b: any) => String(b?.createdate || '').localeCompare(String(a?.createdate || '')));
+    return [...arr].sort((a: any, b: any) =>
+      String(b?.createdate || '').localeCompare(String(a?.createdate || ''))
+    );
   }, [workOrder]);
 
   const [selected, setSelected] = useState<any>(null);
   const [loadingSelected, setLoadingSelected] = useState(false);
 
+  const closeModal = useCallback(() => {
+    setSelected(null);
+    setLoadingSelected(false);
+  }, []);
+
   const openWorklog = useCallback(
     async (wl: any) => {
-      // open immediately (fast UI)
       const longText = extractLongText(wl);
       setSelected({ ...wl, _longText: longText });
 
-      // if already has fields, do nothing
       const hasDesc = !!String(wl?.description || '').trim();
       const hasCreateBy = !!String(wl?.createby || '').trim();
       const hasCreateDate = !!String(wl?.createdate || '').trim();
@@ -54,7 +116,6 @@ export default function DetailsWorkLogScreen({ route }: Props) {
 
       if (hasDesc && hasCreateBy && hasCreateDate && hasLong) return;
 
-      // need localref to fetch full row
       const localref = String(wl?.localref || '').trim();
       if (!localref) return;
 
@@ -84,107 +145,157 @@ export default function DetailsWorkLogScreen({ route }: Props) {
     [authLoading, username, password]
   );
 
+  const renderItem = ({ item: wl }: { item: any }) => {
+    const summary = wl?.description || '—';
+    const longText = extractLongText(wl);
+    const hasLong = !!String(longText || '').trim();
+
+    return (
+      <TouchableOpacity activeOpacity={0.9} onPress={() => openWorklog(wl)} style={styles.card}>
+        <View style={styles.cardTop}>
+          <View style={styles.left}>
+            <View style={styles.badge}>
+              <FeatherIcon name="file-text" size={14} color="#2563eb" />
+              <Text style={styles.badgeText}>
+                {wl?.logtype_description || wl?.logtype || '—'}
+              </Text>
+            </View>
+
+            <Text style={styles.summary} numberOfLines={2}>
+              {summary}
+            </Text>
+
+            <View style={styles.metaRow}>
+              <FeatherIcon name="user" size={14} color="#64748b" />
+              <Text style={styles.metaText}>{wl?.createby || '—'}</Text>
+              <Text style={styles.dot}>•</Text>
+              <FeatherIcon name="calendar" size={14} color="#64748b" />
+              <Text style={styles.metaText}>{formatDate(wl?.createdate)}</Text>
+            </View>
+          </View>
+
+          <View style={styles.right}>
+            <View style={[styles.pill, hasLong ? styles.pillOk : styles.pillWarn]}>
+              <Text style={[styles.pillText, hasLong ? styles.pillTextOk : styles.pillTextWarn]}>
+                {hasLong ? 'Détails' : 'Sans détails'}
+              </Text>
+            </View>
+            <View style={styles.chevronBox}>
+              <FeatherIcon name="chevron-right" size={18} color="#64748b" />
+            </View>
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
   return (
     <SafeAreaView style={detailsStyles.container}>
       <DetailsHeader title="Work Log" subtitle={`OT #${workOrder?.wonum ?? '-'}`} />
 
-      <ScrollView
-        contentContainerStyle={[detailsStyles.content, { paddingBottom: 24 }]}
+      <FlatList
+        data={worklogs}
+        keyExtractor={(wl, index) =>
+          String(wl?.worklogid ?? wl?.localref ?? wl?.href ?? wl?.createdate ?? index)
+        }
+        renderItem={renderItem}
+        contentContainerStyle={[
+          detailsStyles.content,
+          worklogs.length === 0 ? styles.emptyListContent : { paddingBottom: 24 },
+        ]}
         showsVerticalScrollIndicator={false}
-      >
-        {worklogs.length === 0 ? (
+        keyboardShouldPersistTaps="handled"
+        nestedScrollEnabled
+        ListEmptyComponent={
           <View style={detailsStyles.emptyContainer}>
             <FeatherIcon name="message-square" size={40} color="#cbd5e1" />
             <Text style={detailsStyles.emptyText}>Aucun Work Log</Text>
           </View>
-        ) : (
-          worklogs.map((wl: any) => {
-            const summary = wl?.description || '—';
-            const longText = extractLongText(wl);
-            const hasLong = !!String(longText || '').trim();
+        }
+      />
 
-            return (
-              <TouchableOpacity
-                key={String(wl?.worklogid ?? wl?.localref ?? wl?.href ?? wl?.createdate ?? '')}
-                activeOpacity={0.85}
-                onPress={() => openWorklog(wl)}
-                style={styles.card}
-              >
-                <View style={styles.cardTop}>
-                  <View style={styles.left}>
-                    <View style={styles.badge}>
-                      <FeatherIcon name="file-text" size={14} color="#2563eb" />
-                      <Text style={styles.badgeText}>{wl?.logtype_description || wl?.logtype || '—'}</Text>
-                    </View>
+      <Modal
+        visible={!!selected}
+        transparent
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={closeModal}
+      >
+        <View style={styles.modalRoot}>
+          <Pressable style={styles.backdrop} onPress={closeModal} />
 
-                    <Text style={styles.summary} numberOfLines={2}>
-                      {summary}
-                    </Text>
+          <View style={styles.sheet}>
+            <View style={styles.sheetHandleWrap}>
+              <View style={styles.sheetHandle} />
+            </View>
 
-                    <View style={styles.metaRow}>
-                      <FeatherIcon name="user" size={14} color="#64748b" />
-                      <Text style={styles.metaText}>{wl?.createby || '—'}</Text>
-                      <Text style={styles.dot}>•</Text>
-                      <FeatherIcon name="calendar" size={14} color="#64748b" />
-                      <Text style={styles.metaText}>{formatDate(wl?.createdate)}</Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.right}>
-                    <View style={[styles.pill, hasLong ? styles.pillOk : styles.pillWarn]}>
-                      <Text style={styles.pillText}>{hasLong ? 'Détails' : 'Sans détails'}</Text>
-                    </View>
-                    <FeatherIcon name="chevron-right" size={20} color="#94a3b8" />
-                  </View>
+            <View style={styles.sheetHeader}>
+              <View style={styles.sheetHeaderLeft}>
+                <View style={styles.sheetIcon}>
+                  <FeatherIcon name="file-text" size={18} color="#2563eb" />
                 </View>
-              </TouchableOpacity>
-            );
-          })
-        )}
-      </ScrollView>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.sheetTitle}>Détails Work Log</Text>
+                  <Text style={styles.sheetSubtitle}>
+                    {selected?.logtype_description || selected?.logtype || '—'}
+                  </Text>
+                </View>
+              </View>
 
-      <Modal visible={!!selected} transparent animationType="fade" onRequestClose={() => setSelected(null)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Détails Work Log</Text>
-              <TouchableOpacity onPress={() => setSelected(null)} style={styles.closeBtn}>
+              <TouchableOpacity onPress={closeModal} style={styles.closeBtn} activeOpacity={0.8}>
                 <FeatherIcon name="x" size={18} color="#0f172a" />
               </TouchableOpacity>
             </View>
 
-            {/* ✅ Loading indicator when fetching full row */}
-            {loadingSelected ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10 }}>
-                <ActivityIndicator />
-                <Text style={{ fontSize: 12, fontWeight: '800', color: '#334155' }}>Chargement détails...</Text>
+            <View style={styles.metaCard}>
+              <View style={styles.metaItem}>
+                <FeatherIcon name="user" size={14} color="#64748b" />
+                <Text style={styles.metaItemLabel}>Créé par</Text>
+                <Text style={styles.metaItemValue}>{selected?.createby || '—'}</Text>
               </View>
-            ) : null}
 
-            <View style={styles.modalMeta}>
-              <Text style={styles.modalMetaText}>
-                <Text style={styles.modalMetaLabel}>Créé par:</Text> {selected?.createby || '—'}
-              </Text>
-              <Text style={styles.modalMetaText}>
-                <Text style={styles.modalMetaLabel}>Date:</Text> {formatDate(selected?.createdate)}
-              </Text>
-              <Text style={styles.modalMetaText}>
-                <Text style={styles.modalMetaLabel}>Type:</Text>{' '}
-                {selected?.logtype_description || selected?.logtype || '—'}
-              </Text>
+              <View style={styles.metaDivider} />
+
+              <View style={styles.metaItem}>
+                <FeatherIcon name="calendar" size={14} color="#64748b" />
+                <Text style={styles.metaItemLabel}>Date</Text>
+                <Text style={styles.metaItemValue}>{formatDate(selected?.createdate)}</Text>
+              </View>
             </View>
 
-            <Text style={styles.modalSection}>descriprion</Text>
-            <View style={styles.textBox}>
-              <Text style={styles.textBoxText}>{selected?.description || '—'}</Text>
-            </View>
+            <ScrollView
+              style={styles.sheetScroll}
+              contentContainerStyle={styles.sheetScrollContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
+              bounces={false}
+            >
+              {loadingSelected ? (
+                <View style={styles.loadingBox}>
+                  <ActivityIndicator />
+                  <Text style={styles.loadingText}>Chargement des détails...</Text>
+                </View>
+              ) : null}
 
-            <Text style={styles.modalSection}>Détails</Text>
-            <View style={[styles.textBox, { minHeight: 120 }]}>
-              <Text style={styles.textBoxText}>
-                {String(selected?._longText || '').trim() ? selected?._longText : '—'}
-              </Text>
-            </View>
+              <View style={styles.sectionCard}>
+                <Text style={styles.sectionTitle}>Résumé</Text>
+                <Text style={styles.sectionText}>{selected?.description || '—'}</Text>
+              </View>
+
+              <View style={styles.sectionCard}>
+                <Text style={styles.sectionTitle}>Détails</Text>
+                <View style={styles.htmlPreviewBox}>
+                  <WebView
+                    originWhitelist={['*']}
+                    source={{ html: buildHtmlPreview(String(selected?._longText || '')) }}
+                    scrollEnabled={false}
+                    nestedScrollEnabled
+                    style={styles.htmlPreviewWebview}
+                  />
+                </View>
+              </View>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -193,17 +304,35 @@ export default function DetailsWorkLogScreen({ route }: Props) {
 }
 
 const styles = StyleSheet.create({
+  emptyListContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+  },
+
   card: {
     backgroundColor: '#fff',
-    borderRadius: 16,
+    borderRadius: 18,
     padding: 14,
     marginBottom: 12,
     borderWidth: 1,
     borderColor: '#e2e8f0',
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
   },
-  cardTop: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
+  cardTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
   left: { flex: 1 },
-  right: { alignItems: 'flex-end', justifyContent: 'space-between', gap: 10 },
+  right: {
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
 
   badge: {
     alignSelf: 'flex-start',
@@ -217,54 +346,223 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 999,
   },
-  badgeText: { color: '#2563eb', fontWeight: '800', fontSize: 12 },
+  badgeText: {
+    color: '#2563eb',
+    fontWeight: '800',
+    fontSize: 12,
+  },
 
-  summary: { marginTop: 10, fontSize: 15, fontWeight: '800', color: '#0f172a', lineHeight: 20 },
+  summary: {
+    marginTop: 10,
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#0f172a',
+    lineHeight: 21,
+  },
 
-  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, flexWrap: 'wrap' },
-  metaText: { fontSize: 12, color: '#64748b', fontWeight: '700' },
-  dot: { fontSize: 12, color: '#cbd5e1', marginHorizontal: 2 },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 10,
+    flexWrap: 'wrap',
+  },
+  metaText: {
+    fontSize: 12,
+    color: '#64748b',
+    fontWeight: '700',
+  },
+  dot: {
+    fontSize: 12,
+    color: '#cbd5e1',
+    marginHorizontal: 2,
+  },
 
-  pill: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999 },
+  pill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
   pillOk: { backgroundColor: '#dcfce7' },
   pillWarn: { backgroundColor: '#fee2e2' },
-  pillText: { fontSize: 12, fontWeight: '900', color: '#0f172a' },
-
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(15,23,42,0.55)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 16,
+  pillText: {
+    fontSize: 12,
+    fontWeight: '900',
   },
-  modalCard: { width: '100%', maxWidth: 520, backgroundColor: '#fff', borderRadius: 18, padding: 14 },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  modalTitle: { fontSize: 16, fontWeight: '900', color: '#0f172a' },
-  closeBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: '#f1f5f9',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  pillTextOk: { color: '#166534' },
+  pillTextWarn: { color: '#991b1b' },
 
-  modalMeta: { marginTop: 10, gap: 4 },
-  modalMetaText: { fontSize: 12, color: '#334155', fontWeight: '700' },
-  modalMetaLabel: { color: '#64748b' },
-
-  modalSection: { marginTop: 14, fontSize: 13, fontWeight: '900', color: '#0f172a' },
-  textBox: {
-    marginTop: 8,
+  chevronBox: {
+    width: 28,
+    height: 28,
+    borderRadius: 999,
     backgroundColor: '#f8fafc',
-    borderRadius: 12,
-    padding: 12,
     borderWidth: 1,
     borderColor: '#e2e8f0',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  textBoxText: { fontSize: 13, color: '#0f172a', fontWeight: '600', lineHeight: 18 },
 
-  debugBtn: { marginTop: 10, flexDirection: 'row', gap: 8, alignItems: 'center', alignSelf: 'flex-start' },
-  debugBtnText: { color: '#2563eb', fontWeight: '900', fontSize: 12 },
-  refText: { marginTop: 8, fontSize: 11, color: '#334155', fontWeight: '600' },
+  modalRoot: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15,23,42,0.5)',
+  },
+  sheet: {
+    height: '82%',
+    backgroundColor: '#f8fafc',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    overflow: 'hidden',
+  },
+  sheetHandleWrap: {
+    alignItems: 'center',
+    paddingTop: 10,
+    paddingBottom: 4,
+  },
+  sheetHandle: {
+    width: 52,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: '#cbd5e1',
+  },
+  sheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 14,
+  },
+  sheetHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+    paddingRight: 12,
+  },
+  sheetIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    backgroundColor: '#eff6ff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+  },
+  sheetTitle: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#0f172a',
+  },
+  sheetSubtitle: {
+    marginTop: 2,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#64748b',
+  },
+  closeBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  metaCard: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  metaItem: {
+    flex: 1,
+    gap: 4,
+  },
+  metaItemLabel: {
+    fontSize: 12,
+    color: '#64748b',
+    fontWeight: '700',
+  },
+  metaItemValue: {
+    fontSize: 13,
+    color: '#0f172a',
+    fontWeight: '800',
+  },
+  metaDivider: {
+    width: 1,
+    backgroundColor: '#e2e8f0',
+  },
+
+  sheetScroll: {
+    flex: 1,
+  },
+  sheetScrollContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 28,
+  },
+
+  loadingBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    padding: 12,
+    marginBottom: 12,
+  },
+  loadingText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#334155',
+  },
+
+  sectionCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    marginBottom: 12,
+  },
+  sectionTitle: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#0f172a',
+    marginBottom: 10,
+  },
+  sectionText: {
+    fontSize: 14,
+    color: '#0f172a',
+    fontWeight: '600',
+    lineHeight: 20,
+  },
+
+  htmlPreviewBox: {
+    height: 260,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 10,
+    overflow: 'hidden',
+    backgroundColor: '#fff',
+  },
+  htmlPreviewWebview: {
+    backgroundColor: 'transparent',
+  },
 });

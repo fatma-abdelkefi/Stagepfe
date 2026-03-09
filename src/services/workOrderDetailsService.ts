@@ -1,20 +1,18 @@
-// src/services/workOrderDetailsService.ts
 import axios from 'axios';
 import type { WorkOrder } from '../viewmodels/WorkOrdersViewModel';
 
 import { MAXIMO } from '../config/maximoUrls';
 import { makeToken } from './maximoClient';
-import { rewriteDoclinkUrl, metaToDoclinkUrl, doclinkToMetaUrl } from './doclinks';
+import { rewriteDoclinkUrl, metaToDoclinkUrl } from './doclinks';
 import { rewriteMaximoUrl } from './rewriteMaximoUrl';
 
-// ✅ Maximo endpoints
+// Maximo endpoints
 const BASE_URL = `${MAXIMO.OSLC_OS}/mxwo`;
-const MXWO_DETAILS_URL = `${MAXIMO.OSLC_OS}/sm_mxwodetails`;
 
 // --------------------------
 // Helpers
 // --------------------------
-export const parseLabHrs = (val: string | number | undefined): number => {
+export const parseLabHrs = (val: string | number | undefined | null): number => {
   if (val === undefined || val === null || val === '') return 0;
   if (typeof val === 'number') return val;
 
@@ -30,8 +28,19 @@ export const parseLabHrs = (val: string | number | undefined): number => {
   return Number.isFinite(n) ? n : 0;
 };
 
+function parseQty(val: any): number {
+  if (val === undefined || val === null || val === '') return 0;
+  if (typeof val === 'number') return Number.isFinite(val) ? val : 0;
+
+  const s = String(val).trim().replace(',', '.');
+  if (!s) return 0;
+
+  const n = Number(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
 function safeTrim(v: any): string {
-  return typeof v === 'string' ? v.trim() : '';
+  return typeof v === 'string' ? v.trim() : String(v ?? '').trim();
 }
 
 function filenameFromUrl(u?: string): string {
@@ -57,14 +66,18 @@ function toArrayAny(v: any): any[] {
 function pickAnyKey(obj: any, keys: string[]): any {
   if (!obj) return undefined;
 
-  for (const k of keys) if (obj[k] !== undefined) return obj[k];
+  for (const k of keys) {
+    if (obj[k] !== undefined && obj[k] !== null && obj[k] !== '') return obj[k];
+  }
 
   const lowerMap: Record<string, any> = {};
   Object.keys(obj).forEach((k) => (lowerMap[k.toLowerCase()] = obj[k]));
+
   for (const k of keys) {
     const v = lowerMap[k.toLowerCase()];
-    if (v !== undefined) return v;
+    if (v !== undefined && v !== null && v !== '') return v;
   }
+
   return undefined;
 }
 
@@ -90,18 +103,76 @@ function extractMaximoError(res: any): string {
   return http;
 }
 
-function patchHeaders(token: string): any {
+function maxauthHeaders(token: string): any {
   return {
     MAXAUTH: token,
-    Authorization: `Basic ${token}`,
     Accept: 'application/json',
     'Content-Type': 'application/json',
-    'x-method-override': 'PATCH',
-    patchtype: 'MERGE',
-    'If-Match': '*',
     'Cache-Control': 'no-cache',
     Pragma: 'no-cache',
   };
+}
+
+function patchHeaders(token: string): any {
+  return {
+    ...maxauthHeaders(token),
+    'x-method-override': 'PATCH',
+    patchtype: 'MERGE',
+    'If-Match': '*',
+  };
+}
+
+export function normalizeOslcHref(anyHref: string): string {
+  const href = String(anyHref || '').trim();
+  if (!href) return '';
+
+  const publicBase = String(MAXIMO.OSLC_OS).split('/oslc/os')[0].replace(/\/+$/, '');
+
+  if (href.startsWith(publicBase)) return href.replace(/\/+$/, '');
+
+  const idxOslc = href.indexOf('/oslc/os/');
+  if (idxOslc >= 0) {
+    const tail = href.substring(idxOslc);
+    return `${publicBase}${tail}`.replace(/\/+$/, '');
+  }
+
+  const idxMaximo = href.indexOf('/maximo/');
+  if (idxMaximo >= 0) {
+    const tail = href.substring(idxMaximo + '/maximo'.length);
+    return `${publicBase}${tail}`.replace(/\/+$/, '');
+  }
+
+  if (href.startsWith('/')) return `${publicBase}${href}`.replace(/\/+$/, '');
+
+  return href.replace(/\/+$/, '');
+}
+
+export async function getWoHrefByWonum(wonum: string, username: string, password: string): Promise<string> {
+  const token = makeToken(username, password);
+
+  const res = await axios.get<any>(BASE_URL, {
+    headers: {
+      MAXAUTH: token,
+      Accept: 'application/json',
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache',
+    },
+    params: {
+      lean: 1,
+      'oslc.where': `wonum="${wonum}"`,
+      'oslc.pageSize': 1,
+      'oslc.select': 'href,wonum,siteid',
+      _ts: Date.now(),
+    },
+    timeout: 30000,
+    validateStatus: () => true,
+  });
+
+  if (res.status >= 400) throw new Error(extractMaximoError(res));
+  const href = String(res.data?.member?.[0]?.href ?? '').trim();
+  const fixed = normalizeOslcHref(href);
+  if (!fixed) throw new Error('href mxwo introuvable pour ce wonum');
+  return fixed.replace(/\/+$/, '');
 }
 
 // --------------------------
@@ -139,11 +210,11 @@ export function normalizeDoclinks(raw: any): NormalizedDocLink[] {
     const describedByHref = rewriteDoclinkUrl(safeTrim(d?.describedBy?.href));
     const describedByDesc = safeTrim(d?.describedBy?.description);
 
-    const href = rewriteDoclinkUrl(metaToDoclinkUrl(safeTrim(d?.href) || safeTrim(di?.href)));
+    const href = normalizeOslcHref(rewriteDoclinkUrl(metaToDoclinkUrl(safeTrim(d?.href) || safeTrim(di?.href))));
     const doclinkId = extractDoclinkIdFromHref(href);
 
     const rawUrl = safeTrim(d?.urlname) || safeTrim(di?.urlname) || safeTrim(di?.href) || safeTrim(d?.href);
-    const urlname = rewriteDoclinkUrl(rawUrl);
+    const urlname = normalizeOslcHref(rewriteDoclinkUrl(rawUrl));
 
     const title =
       safeTrim(d?.upload_documentname) ||
@@ -197,14 +268,14 @@ export async function getDoclinkDetailsByHref(
   password: string
 ): Promise<Partial<NormalizedDocLink> | null> {
   const token = makeToken(username, password);
-  const fixed = rewriteDoclinkUrl(metaToDoclinkUrl(anyHref));
+
+  const fixed = normalizeOslcHref(rewriteDoclinkUrl(metaToDoclinkUrl(anyHref)));
   if (!fixed) return null;
 
   try {
     const res = await axios.get<any>(fixed, {
       headers: {
         MAXAUTH: token,
-        Authorization: `Basic ${token}`,
         Accept: 'application/json',
         properties: '*',
       },
@@ -253,89 +324,8 @@ export async function getDoclinkDetailsByHref(
 
     const rawUrl = safeTrim(obj?.urlname) || safeTrim(di?.urlname) || safeTrim(obj?.href) || safeTrim(di?.href);
 
-    const urlname = rewriteDoclinkUrl(rawUrl);
-    const href = rewriteDoclinkUrl(metaToDoclinkUrl(safeTrim(obj?.href) || safeTrim(di?.href)));
-
-    const display = title || filenameFromUrl(urlname) || filenameFromUrl(href);
-
-    return {
-      document: display || undefined,
-      description: desc || undefined,
-      createdate: createdate || undefined,
-      urlname: urlname || undefined,
-      href: href || undefined,
-    };
-  } catch {
-    return null;
-  }
-}
-
-export async function getDoclinkMetaByHref(
-  anyHref: string,
-  username: string,
-  password: string
-): Promise<Partial<NormalizedDocLink> | null> {
-  const token = makeToken(username, password);
-
-  const metaUrl = rewriteDoclinkUrl(doclinkToMetaUrl(anyHref));
-  if (!metaUrl) return null;
-
-  try {
-    const res = await axios.get<any>(metaUrl, {
-      headers: {
-        MAXAUTH: token,
-        Authorization: `Basic ${token}`,
-        Accept: 'application/json',
-        properties: '*',
-      },
-      params: {
-        lean: 1,
-        'oslc.select': '*,docinfo{*},describedBy{*}',
-        'oslc.expand': 'docinfo,describedBy',
-        _ts: Date.now(),
-      },
-      timeout: 30000,
-      validateStatus: () => true,
-    });
-
-    if (res.status >= 400) return null;
-
-    const obj: any = res.data?.member?.[0] ?? res.data;
-    if (!obj) return null;
-
-    const di = pickDocInfo(obj);
-
-    const title =
-      safeTrim(obj?.upload_documentname) ||
-      safeTrim(obj?.documenttitle) ||
-      safeTrim(obj?.documentname) ||
-      safeTrim(obj?.filename) ||
-      safeTrim(di?.upload_documentname) ||
-      safeTrim(di?.documenttitle) ||
-      safeTrim(di?.documentname) ||
-      safeTrim(di?.doctitle) ||
-      safeTrim(di?.title);
-
-    const desc =
-      safeTrim(obj?.description) ||
-      safeTrim(di?.description) ||
-      safeTrim(obj?.describedBy?.description) ||
-      '';
-
-    const createdate =
-      safeTrim(obj?.createdate) ||
-      safeTrim(di?.createdate) ||
-      safeTrim(obj?.creationdate) ||
-      safeTrim(di?.creationdate) ||
-      safeTrim(obj?.changedate) ||
-      safeTrim(di?.changedate) ||
-      '';
-
-    const rawUrl = safeTrim(obj?.urlname) || safeTrim(di?.urlname) || safeTrim(obj?.href) || safeTrim(di?.href);
-
-    const urlname = rewriteDoclinkUrl(rawUrl);
-
-    const href = rewriteDoclinkUrl(metaToDoclinkUrl(safeTrim(obj?.href) || safeTrim(di?.href) || metaUrl));
+    const urlname = normalizeOslcHref(rewriteDoclinkUrl(rawUrl));
+    const href = normalizeOslcHref(rewriteDoclinkUrl(metaToDoclinkUrl(safeTrim(obj?.href) || safeTrim(di?.href))));
 
     const display = title || filenameFromUrl(urlname) || filenameFromUrl(href);
 
@@ -352,150 +342,457 @@ export async function getDoclinkMetaByHref(
 }
 
 // --------------------------
-// ✅ ACTUALS GET (LABTRANS + MATUSETRANS) - FIXED + returns mxwoDetailsHref
+// ACTUALS READ/WRITE
 // --------------------------
-export type ActualLaborItem = { laborcode: string; regularhrs: number };
+
+export type ActualLaborItem = { laborcode: string; regularhrs: number; transdate?: string };
 export type ActualMaterialItem = { itemnum: string; itemqty: number; description: string };
 
-export async function getActualMaterialAndLabor(
-  wonum: string,
-  siteid: string,
+function normalizeCollectionAny(v: any): any[] {
+  if (!v) return [];
+  if (Array.isArray(v)) return v;
+  if (Array.isArray(v?.member)) return v.member;
+  return [v];
+}
+
+function mapActualMaterial(m: any): ActualMaterialItem {
+  return {
+    itemnum: safeTrim(
+      pickAnyKey(m, ['itemnum', 'ITEMNUM'])
+    ),
+    itemqty: parseQty(
+      pickAnyKey(m, [
+        'itemqty',
+        'ITEMQTY',
+        'quantity',
+        'QUANTITY',
+        'qty',
+        'QTY',
+        'actualqty',
+        'ACTUALQTY',
+        'issueqty',
+        'ISSUEQTY',
+        'matuseqty',
+        'MATUSEQTY',
+        'usedqty',
+        'USEDQTY',
+      ])
+    ),
+    description: safeTrim(
+      pickAnyKey(m, ['description', 'DESCRIPTION', 'itemdesc', 'ITEMDESC'])
+    ) || '—',
+  };
+}
+
+export async function getActualsFromWoHref(
+  woHref: string,
   username: string,
   password: string
-): Promise<{ actualLabor: ActualLaborItem[]; actualMaterials: ActualMaterialItem[]; mxwoDetailsHref?: string }> {
+): Promise<{ actualLabor: ActualLaborItem[]; actualMaterials: ActualMaterialItem[] }> {
   const token = makeToken(username, password);
+  const fixedHref = normalizeOslcHref(woHref).replace(/\/+$/, '');
 
-  const res = await axios.get<any>(MXWO_DETAILS_URL, {
+  console.log('[ACTUALS] GET MXWO URL:', fixedHref);
+
+  const res = await axios.get<any>(fixedHref, {
     headers: {
       MAXAUTH: token,
-      Authorization: `Basic ${token}`,
       Accept: 'application/json',
       'Cache-Control': 'no-cache',
       Pragma: 'no-cache',
     },
     params: {
       lean: 1,
-      'oslc.select': 'href,wonum,LABTRANS{laborcode,regularhrs},MATUSETRANS{itemnum,itemqty,description}',
-      'oslc.where': `wonum="${wonum}" and siteid="${siteid}"`,
-      ignorecollectionref: 1,
-      'oslc.pageSize': 1,
+      'oslc.select':
+        'href,wonum,siteid,' +
+        'labtrans{laborcode,regularhrs,transdate},' +
+        'labtrans_reporting{laborcode,regularhrs,transdate},' +
+        'matusetrans_collectionref,labtrans_collectionref',
+      'oslc.expand': 'labtrans,labtrans_reporting',
       _ts: Date.now(),
     },
     timeout: 30000,
     validateStatus: () => true,
   });
 
-  if (res.status >= 400) return { actualLabor: [], actualMaterials: [], mxwoDetailsHref: '' };
+  console.log('[ACTUALS] MXWO status:', res.status);
+  if (res.status >= 400) return { actualLabor: [], actualMaterials: [] };
 
   const obj = res.data?.member?.[0] ?? res.data ?? {};
 
-  // ✅ THIS is the href needed for POST actuals
-  const mxwoDetailsHref = safeTrim(obj?.href);
+  const labRaw = [
+    ...normalizeCollectionAny(pickAnyKey(obj, ['labtrans', 'LABTRANS'])),
+    ...normalizeCollectionAny(pickAnyKey(obj, ['labtrans_reporting', 'LABTRANS_REPORTING'])),
+  ];
 
-  // Maximo sometimes returns lower-case keys in JSON
-  const labRaw = pickAnyKey(obj, ['LABTRANS', 'labtrans']);
-  const matRaw = pickAnyKey(obj, ['MATUSETRANS', 'matusetrans']);
+  const actualLabor: ActualLaborItem[] = labRaw
+    .map((l: any) => ({
+      laborcode: safeTrim(pickAnyKey(l, ['laborcode', 'LABORCODE'])),
+      regularhrs: parseLabHrs(pickAnyKey(l, ['regularhrs', 'REGULARHRS'])),
+      transdate: safeTrim(pickAnyKey(l, ['transdate', 'TRANSDATE'])) || undefined,
+    }))
+    .filter((x) => !!x.laborcode || x.regularhrs > 0);
 
-  const labArr = toArrayAny(labRaw);
-  const matArr = toArrayAny(matRaw);
+  const matRefRaw =
+    safeTrim(pickAnyKey(obj, ['matusetrans_collectionref', 'MATUSETRANS_COLLECTIONREF'])) || '';
+
+  const matRef = matRefRaw ? normalizeOslcHref(matRefRaw).replace(/\/+$/, '') : '';
+
+  console.log('[ACTUALS] MATUSETRANS collectionref:', matRef);
+
+  let actualMaterials: ActualMaterialItem[] = [];
+
+  if (matRef) {
+    const matRes = await axios.get<any>(matRef, {
+      headers: {
+        MAXAUTH: token,
+        Accept: 'application/json',
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
+      },
+      params: {
+        lean: 1,
+        'oslc.pageSize': 1000,
+        'oslc.select':
+          'itemnum,itemqty,quantity,qty,actualqty,issueqty,matuseqty,usedqty,description,itemdesc',
+        _ts: Date.now(),
+      },
+      timeout: 30000,
+      validateStatus: () => true,
+    });
+
+    console.log('[ACTUALS] MATUSETRANS status:', matRes.status);
+    console.log('[ACTUALS] MATUSETRANS body:', JSON.stringify(matRes.data, null, 2));
+
+    if (matRes.status < 400) {
+      const members = normalizeCollectionAny(matRes.data?.member ?? matRes.data);
+
+      actualMaterials = members
+        .map(mapActualMaterial)
+        .filter((x) => !!x.itemnum || x.itemqty > 0);
+    }
+  }
+
+  console.log('[ACTUALS] FINAL MAT COUNT:', actualMaterials.length);
+  console.log('[ACTUALS] FINAL MAT DATA:', JSON.stringify(actualMaterials, null, 2));
+
+  return { actualLabor, actualMaterials };
+}
+
+export async function getActualsByWonumSiteid(
+  wonum: string,
+  siteid: string,
+  username: string,
+  password: string
+): Promise<{ actualLabor: ActualLaborItem[]; actualMaterials: ActualMaterialItem[] }> {
+  const token = makeToken(username, password);
+
+  console.log('[ACTUALS] GET DETAILS URL:', `${MAXIMO.OSLC_OS}/sm_mxwodetails`, 'wonum:', wonum, 'siteid:', siteid);
+
+  const res = await axios.get<any>(`${MAXIMO.OSLC_OS}/sm_mxwodetails`, {
+    headers: {
+      MAXAUTH: token,
+      Accept: 'application/json',
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache',
+    },
+    params: {
+      lean: 1,
+      ignorecollectionref: 1,
+      'oslc.where': `wonum="${wonum}" and siteid="${siteid}"`,
+      'oslc.pageSize': 1,
+      'oslc.select':
+        'wonum,siteid,' +
+        'labtrans{laborcode,regularhrs,transdate},' +
+        'matusetrans{itemnum,itemqty,quantity,qty,actualqty,issueqty,matuseqty,usedqty,description,itemdesc}',
+      _ts: Date.now(),
+    },
+    timeout: 30000,
+    validateStatus: () => true,
+  });
+
+  console.log('[ACTUALS] DETAILS status:', res.status);
+  console.log('[ACTUALS] DETAILS body:', JSON.stringify(res.data, null, 2));
+
+  if (res.status >= 400) return { actualLabor: [], actualMaterials: [] };
+
+  const obj = res.data?.member?.[0] ?? {};
+  const labRaw = pickAnyKey(obj, ['labtrans', 'LABTRANS']);
+  const matRaw = pickAnyKey(obj, ['matusetrans', 'MATUSETRANS']);
+
+  const labArr = normalizeCollectionAny(labRaw);
+  const matArr = normalizeCollectionAny(matRaw);
 
   const actualLabor: ActualLaborItem[] = labArr
     .map((l: any) => ({
       laborcode: safeTrim(pickAnyKey(l, ['laborcode', 'LABORCODE'])),
       regularhrs: parseLabHrs(pickAnyKey(l, ['regularhrs', 'REGULARHRS'])),
+      transdate: safeTrim(pickAnyKey(l, ['transdate', 'TRANSDATE'])) || undefined,
     }))
     .filter((x) => !!x.laborcode || x.regularhrs > 0);
 
   const actualMaterials: ActualMaterialItem[] = matArr
-    .map((m: any) => ({
-      itemnum: safeTrim(pickAnyKey(m, ['itemnum', 'ITEMNUM'])),
-      itemqty: Number(pickAnyKey(m, ['itemqty', 'ITEMQTY']) ?? 0),
-      description: safeTrim(pickAnyKey(m, ['description', 'DESCRIPTION'])) || '—',
-    }))
+    .map(mapActualMaterial)
     .filter((x) => !!x.itemnum || x.itemqty > 0);
 
-  return { actualLabor, actualMaterials, mxwoDetailsHref };
+  console.log('[ACTUALS] DETAILS MAT DATA:', JSON.stringify(actualMaterials, null, 2));
+
+  return { actualLabor, actualMaterials };
 }
 
 // --------------------------
-// ✅ ACTUALS POST (same as Postman) - FIXED + TS safe
+// ACTUALS WRITE
 // --------------------------
+export type AddActualResult = {
+  status: number;
+  data: any;
+  bodyText: string;
+};
 
-// 1) ✅ add actual material: MUST use matusetrans_reporting + PATCH override headers
+function toBodyText(data: any): string {
+  if (data === undefined || data === null) return '';
+  if (typeof data === 'string') return data;
+  try {
+    return JSON.stringify(data);
+  } catch {
+    return String(data);
+  }
+}
+
+function toIsoWithOffset(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+
+  const yyyy = d.getFullYear();
+  const mm = pad(d.getMonth() + 1);
+  const dd = pad(d.getDate());
+  const hh = pad(d.getHours());
+  const mi = pad(d.getMinutes());
+  const ss = pad(d.getSeconds());
+
+  const tzMin = -d.getTimezoneOffset();
+  const sign = tzMin >= 0 ? '+' : '-';
+  const tzAbs = Math.abs(tzMin);
+  const tzh = pad(Math.floor(tzAbs / 60));
+  const tzm = pad(tzAbs % 60);
+
+  return `${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}${sign}${tzh}:${tzm}`;
+}
+
+function toIsoNoTz(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return (
+    `${d.getUTCFullYear()}-` +
+    `${pad(d.getUTCMonth() + 1)}-` +
+    `${pad(d.getUTCDate())}T` +
+    `${pad(d.getUTCHours())}:` +
+    `${pad(d.getUTCMinutes())}:` +
+    `${pad(d.getUTCSeconds())}`
+  );
+}
+
+// --------------------------
+// ACTUALS WRITE (MATERIAL)
+// --------------------------
 export async function addActualMaterial(
-  woHref: string, // should be mxwoDetailsHref (sm_mxwodetails member href)
+  woHref: string,
   username: string,
   password: string,
   payload: {
     itemnum: string;
-    quantity: number;
-    storeloc: string;
-    issuetype: string; // "ISSUE"
+    itemqty: number;
+    storeroom: string;
+    issuetype: string;
+    siteid: string;
   }
-): Promise<void> {
+): Promise<AddActualResult> {
   const token = makeToken(username, password);
 
-  const fixedHref = rewriteMaximoUrl(woHref) || woHref;
-  const url = `${fixedHref}?lean=1`;
+  const fixedHref = normalizeOslcHref(rewriteMaximoUrl(woHref) || woHref).replace(/\/+$/, '');
+  const url = `${fixedHref}?lean=1&_ts=${Date.now()}`;
 
-  const res = await axios.post(
-    url,
-    {
-      matusetrans_reporting: [
-        {
-          itemnum: payload.itemnum,
-          quantity: payload.quantity,
-          storeloc: payload.storeloc,
-          issuetype: payload.issuetype,
-        },
-      ],
+  const body = {
+    itemnum: String(payload.itemnum || '').trim(),
+    itemqty: parseQty(payload.itemqty),
+    storeroom: String(payload.storeroom || '').trim(),
+    issuetype: String(payload.issuetype || '').trim(),
+    siteid: String(payload.siteid || '').trim(),
+  };
+
+  console.log('──────────── addActualMaterial START ────────────');
+  console.log('[addActualMaterial] URL:', url);
+  console.log('[addActualMaterial] BODY:', JSON.stringify(body, null, 2));
+
+  const res = await axios.post(url, body, {
+    headers: {
+      ...maxauthHeaders(token),
+      'x-method-override': 'PATCH',
+      patchtype: 'MERGE',
+      'If-Match': '*',
     },
-    {
-      headers: patchHeaders(token),
-      timeout: 30000,
-      validateStatus: () => true,
-    }
-  );
+    timeout: 30000,
+    validateStatus: () => true,
+  });
 
-  // success: 204 No Content
+  console.log('[addActualMaterial] RESPONSE STATUS:', res.status);
+  console.log('[addActualMaterial] RESPONSE BODY:', toBodyText(res.data));
+
   if (!(res.status === 204 || (res.status >= 200 && res.status < 300))) {
     throw new Error(extractMaximoError(res));
   }
+
+  console.log('[addActualMaterial] ✅ PATCH SUCCESS');
+  console.log('──────────── addActualMaterial END ────────────');
+
+  return {
+    status: res.status,
+    data: res.data,
+    bodyText: toBodyText(res.data),
+  };
 }
 
-// 2) ✅ add actual labor: POST array to /labtrans (use same PATCH override headers)
 export async function addActualLabor(
-  woHref: string, // should be mxwoDetailsHref (sm_mxwodetails member href)
+  woHref: string,
   username: string,
   password: string,
-  payload: {
-    laborcode: string;
-    regularhrs: number;
-  }
-): Promise<void> {
+  payload: { laborcode: string; regularhrs: number }
+): Promise<AddActualResult> {
+  console.log('──────────── addActualLabor START ────────────');
+
   const token = makeToken(username, password);
 
-  const fixedHref = rewriteMaximoUrl(woHref) || woHref;
-  const url = `${fixedHref}/labtrans?lean=1`;
+  const fixedHref = normalizeOslcHref(woHref).replace(/\/+$/, '');
+  const url = `${fixedHref}?lean=1&_ts=${Date.now()}`;
 
-  const res = await axios.post(
-    url,
-    [
-      {
-        laborcode: payload.laborcode,
-        regularhrs: payload.regularhrs,
+  const laborcode = String(payload.laborcode || '').trim();
+  const regularhrs = Number(payload.regularhrs || 0);
+
+  console.log('[addActualLabor] WO HREF (input):', woHref);
+  console.log('[addActualLabor] fixedHref:', fixedHref);
+  console.log('[addActualLabor] PATCH URL:', url);
+  console.log('[addActualLabor] input payload:', { laborcode, regularhrs });
+
+  let serverNow: Date | null = null;
+
+  try {
+    console.log('──────────── SERVER TIME PROBE ────────────');
+
+    const probe = await axios.get<any>(fixedHref, {
+      headers: {
+        MAXAUTH: token,
+        Accept: 'application/json',
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
       },
-    ],
-    {
-      headers: patchHeaders(token),
+      params: { lean: 1, _ts: Date.now() },
       timeout: 30000,
       validateStatus: () => true,
-    }
-  );
+    });
 
-  if (!(res.status >= 200 && res.status < 300)) {
+    const serverDateHeader: string | undefined = probe.headers?.date;
+    console.log('[probe] status:', probe.status);
+    console.log('[probe] server Date header:', serverDateHeader);
+
+    if (serverDateHeader) {
+      const parsed = new Date(serverDateHeader);
+      if (!Number.isNaN(parsed.getTime())) serverNow = parsed;
+    }
+  } catch (e: any) {
+    console.log('[probe] ❌ exception:', e?.message);
+  }
+
+  const deviceNow = new Date();
+  console.log('[time] deviceNow ISO:', deviceNow.toISOString());
+
+  if (serverNow) {
+    console.log('[time] serverNow ISO:', serverNow.toISOString());
+    console.log('[time] diff(ms) device-server:', deviceNow.getTime() - serverNow.getTime());
+  } else {
+    console.log('[time] serverNow not available -> fallback device time');
+  }
+
+  const base = serverNow ?? deviceNow;
+  const bufferMinutes = 10;
+  const backMinutes = regularhrs * 60 + bufferMinutes;
+  const safeDate = new Date(base.getTime() - backMinutes * 60 * 1000);
+  const transdate = toIsoNoTz(safeDate);
+
+  console.log('[addActualLabor] chosen transdate (no tz, UTC):', transdate);
+
+  const patchBody = {
+    labtrans: [
+      {
+        laborcode,
+        regularhrs,
+        transdate,
+      },
+    ],
+  };
+
+  console.log('[addActualLabor] PATCH BODY:', JSON.stringify(patchBody, null, 2));
+
+  const res = await axios.post(url, patchBody, {
+    headers: {
+      MAXAUTH: token,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache',
+      'x-method-override': 'PATCH',
+      patchtype: 'MERGE',
+      'If-Match': '*',
+    },
+    timeout: 30000,
+    validateStatus: () => true,
+  });
+
+  console.log('[addActualLabor] RESPONSE STATUS:', res.status);
+  console.log('[addActualLabor] RESPONSE BODY:', toBodyText(res.data));
+
+  if (!(res.status === 204 || (res.status >= 200 && res.status < 300))) {
+    console.log('[addActualLabor] ❌ ERROR BODY:', toBodyText(res.data));
     throw new Error(extractMaximoError(res));
   }
+
+  console.log('[addActualLabor] ✅ PATCH SUCCESS');
+
+  try {
+    console.log('──────────── VERIFY AFTER PATCH ────────────');
+
+    const verify = await axios.get<any>(fixedHref, {
+      headers: { MAXAUTH: token, Accept: 'application/json' },
+      params: {
+        lean: 1,
+        'oslc.select': 'labtrans{laborcode,regularhrs,transdate}',
+        'oslc.expand': 'labtrans',
+        _ts: Date.now(),
+      },
+      timeout: 30000,
+      validateStatus: () => true,
+    });
+
+    console.log('[VERIFY] STATUS:', verify.status);
+
+    if (verify.status < 300) {
+      console.log('✅ VERIFY LABTRANS AFTER PATCH:');
+      console.log(JSON.stringify(verify.data, null, 2));
+
+      const data: any = verify.data;
+      const lab = data?.labtrans ?? data?.member?.[0]?.labtrans ?? [];
+      console.log('[VERIFY] LABTRANS COUNT:', Array.isArray(lab) ? lab.length : 0);
+    } else {
+      console.log('[VERIFY] ❌ ERROR BODY:', JSON.stringify(verify.data, null, 2));
+    }
+  } catch (err: any) {
+    console.log('[VERIFY] ❌ EXCEPTION:', err?.message);
+  }
+
+  console.log('──────────── addActualLabor END ────────────');
+
+  return {
+    status: res.status,
+    data: res.data,
+    bodyText: toBodyText(res.data),
+  };
 }
 
 // --------------------------
@@ -503,29 +800,22 @@ export async function addActualLabor(
 // --------------------------
 interface MaximoWorkOrderItem {
   href?: string;
-
   wonum?: string;
   description?: string;
   status?: string;
-
   assetnum?: string;
   asset?: { description?: string } | string;
-
   location?: string | { location?: string };
   locationdescription?: string;
-
   priority?: number | string;
   siteid?: string;
   workorderid?: number;
   ishistory?: boolean;
-
   scheduledstart?: string;
   scheduledfinish?: string;
-
   woactivity?: any | any[];
   wplabor?: any | any[];
   wpmaterial?: any | any[];
-
   doclinks?: any;
 }
 
@@ -544,7 +834,6 @@ export async function getWorkOrderDetails(
     const res = await axios.get<MaximoResponse>(BASE_URL, {
       headers: {
         MAXAUTH: token,
-        Authorization: `Basic ${token}`,
         Accept: 'application/json',
         properties: '*',
         'Cache-Control': 'no-cache',
@@ -585,7 +874,7 @@ export async function getWorkOrderDetails(
       wonum: item.wonum ?? wonum,
       barcode: item.wonum ?? wonum,
 
-      href: safeTrim((item as any)?.href) || undefined,
+      href: normalizeOslcHref(safeTrim((item as any)?.href)) || undefined,
 
       description: item.description ?? '',
       details: '',
@@ -617,7 +906,7 @@ export async function getWorkOrderDetails(
       activities: activitiesRaw.map((a: any) => {
         const status = String(a?.status ?? '');
         return {
-          href: safeTrim(a?.href) || undefined,
+          href: normalizeOslcHref(safeTrim(a?.href)) || undefined,
           taskid: String(a?.taskid ?? ''),
           description: a?.description ?? '',
           labhrs: parseLabHrs(a?.labhrs),
@@ -637,7 +926,7 @@ export async function getWorkOrderDetails(
         taskid: String(m?.taskid ?? ''),
         itemnum: m?.itemnum ?? '',
         description: m?.description ?? '',
-        quantity: Number(m?.itemqty ?? 0),
+        quantity: parseQty(m?.itemqty ?? m?.quantity ?? m?.qty),
       })),
 
       docLinks: docLinksArr as any,

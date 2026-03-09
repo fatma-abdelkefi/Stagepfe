@@ -3,7 +3,6 @@ import { StyleSheet } from 'react-native';
 export const detailsStyles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8fafc' },
 
-  // ✅ header keys already used by DetailsHeader.tsx
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -29,13 +28,19 @@ export const detailsStyles = StyleSheet.create({
     marginTop: 2,
   },
 
-  // ✅ shared content padding
-  content: { flex: 1, padding: 16 },
+  content: {
+    padding: 16,
+    paddingBottom: 24,
+  },
+
+  contentGrow: {
+    flexGrow: 1,
+  },
+
   listContainer: { paddingBottom: 24 },
 
   sectionInfo: { fontSize: 15, fontWeight: '600', color: '#64748b', marginBottom: 16 },
 
-  // ✅ shared card design (same as activities)
   card: {
     backgroundColor: '#fff',
     borderRadius: 16,
@@ -69,7 +74,6 @@ export const detailsStyles = StyleSheet.create({
   label: { color: '#64748b', fontWeight: '700' },
   value: { color: '#0f172a', fontWeight: '800' },
 
-  // ✅ shared empty state
   emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 120 },
   emptyText: {
     marginTop: 16,
@@ -79,7 +83,6 @@ export const detailsStyles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  // ✅ optional shared button style if you want consistent action buttons
   actionBtn: {
     backgroundColor: '#3b82f6',
     paddingHorizontal: 12,

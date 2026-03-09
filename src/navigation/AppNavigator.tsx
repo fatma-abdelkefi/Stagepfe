@@ -37,21 +37,17 @@ export type RootStackParamList = {
   WorkOrders: undefined;
   WorkOrderDetails: { workOrder: WorkOrder };
 
-  // Category detail screens
   DetailsActivities: { workOrder: WorkOrder };
   DetailsLabor: { workOrder: WorkOrder };
   DetailsMaterials: { workOrder: WorkOrder };
   DetailsDocuments: { workOrder: WorkOrder };
 
-  // ✅ Better: keep same WorkOrder type everywhere
-  DetailsActualLabor: { workOrder: WorkOrder };
-  DetailsActualMaterials: { workOrder: WorkOrder };
+  DetailsActualLabor: { workOrder: WorkOrder; woHref?: string };
+  DetailsActualMaterials: { workOrder: WorkOrder; woHref?: string };
 
-  // Documents screens
   DocDetails: { document: any };
   DocViewer: { document: any };
 
-  // Add screens
   AddLabor: {
     workorderid: number;
     siteid: string;
@@ -72,33 +68,37 @@ export type RootStackParamList = {
     siteid: string;
   };
 
-  // ✅ Actuals add screens
   AddActualMaterial: { woHref: string; wonum: string; siteid: string };
   AddActualLabor: { woHref: string; wonum: string; siteid: string };
 
   DetailsWorkLog: { workOrder: WorkOrder };
 
   AddWorkLog: {
-  wonum: string;
-  siteid?: string;
-  workorderid?: number | string;
-
-  // ✅ NEW (what AddWorkLogScreen needs)
-  woHref?: string;
-
-  // keep if used elsewhere
-  mxwoDetailsHref?: string;
-  worklogCollectionRef?: string;
-};
+    wonum: string;
+    siteid?: string;
+    workorderid?: number | string;
+    woHref?: string;
+    mxwoDetailsHref?: string;
+    worklogCollectionRef?: string;
+  };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 function Splash() {
   return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0b1220' }}>
+    <View
+      style={{
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#0b1220',
+      }}
+    >
       <ActivityIndicator size="large" color="#3b82f6" />
-      <Text style={{ marginTop: 12, color: '#93c5fd', fontWeight: '600' }}>Chargement...</Text>
+      <Text style={{ marginTop: 12, color: '#93c5fd', fontWeight: '600' }}>
+        Chargement...
+      </Text>
     </View>
   );
 }
@@ -110,7 +110,10 @@ export default function AppNavigator() {
   if (authLoading) return <Splash />;
 
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName="Launch">
+    <Stack.Navigator
+      screenOptions={{ headerShown: false }}
+      initialRouteName="Launch"
+    >
       <Stack.Screen name="Launch" component={LaunchScreen} />
 
       {isLoggedIn ? (
@@ -122,6 +125,7 @@ export default function AppNavigator() {
           <Stack.Screen name="DetailsLabor" component={DetailsLaborScreen} />
           <Stack.Screen name="DetailsMaterials" component={DetailsMaterialsScreen} />
           <Stack.Screen name="DetailsDocuments" component={DetailsDocumentsScreen} />
+
           <Stack.Screen name="DetailsActualLabor" component={DetailsActualLaborScreen} />
           <Stack.Screen name="DetailsActualMaterials" component={DetailsActualMaterialsScreen} />
 
@@ -134,8 +138,16 @@ export default function AppNavigator() {
           <Stack.Screen name="AddActualMaterial" component={AddActualMaterialScreen} />
           <Stack.Screen name="AddActualLabor" component={AddActualLaborScreen} />
 
-          <Stack.Screen name="DetailsWorkLog" component={DetailsWorkLogScreen} options={{ title: 'Work log' }} />
-          <Stack.Screen name="AddWorkLog" component={AddWorkLogScreen} options={{ title: 'Ajouter Work log' }} />
+          <Stack.Screen
+            name="DetailsWorkLog"
+            component={DetailsWorkLogScreen}
+            options={{ title: 'Work log' }}
+          />
+          <Stack.Screen
+            name="AddWorkLog"
+            component={AddWorkLogScreen}
+            options={{ title: 'Ajouter Work log' }}
+          />
         </>
       ) : (
         <Stack.Screen name="Login" component={LoginScreen} />

@@ -199,47 +199,50 @@ export function useWorkOrders() {
   };
 
   const filteredData = useMemo(() => {
-    return data.filter((item) => {
-      if (barcodeFilter && item.barcode !== barcodeFilter) return false;
+  return data.filter((item) => {
+    const scanned = barcodeFilter?.trim();
+    const itemBarcode = item.barcode?.trim();
+    const itemWonum = item.wonum?.trim();
 
-      const q = search.toLowerCase().trim();
-      const matchesSearch =
-        q === '' ||
-        item.wonum.toLowerCase().includes(q) ||
-        item.description.toLowerCase().includes(q) ||
-        item.details.toLowerCase().includes(q) ||
-        item.location.toLowerCase().includes(q) ||
-        item.asset.toLowerCase().includes(q) ||
-        item.status.toLowerCase().includes(q) ||
-        item.site.toLowerCase().includes(q);
+    if (scanned && itemBarcode !== scanned && itemWonum !== scanned) return false;
 
-      if (!matchesSearch) return false;
+    const q = search.toLowerCase().trim();
+    const matchesSearch =
+      q === '' ||
+      item.wonum.toLowerCase().includes(q) ||
+      item.description.toLowerCase().includes(q) ||
+      item.details.toLowerCase().includes(q) ||
+      item.location.toLowerCase().includes(q) ||
+      item.asset.toLowerCase().includes(q) ||
+      item.status.toLowerCase().includes(q) ||
+      item.site.toLowerCase().includes(q);
 
-      if (selectedDate) {
-        if (!item.scheduledStart) return false;
-        const woDate = new Date(item.scheduledStart);
-        if (!isSameDay(woDate, selectedDate)) return false;
-      }
+    if (!matchesSearch) return false;
 
-      switch (activeFilter) {
-        case 'Tous':
-          return true;
-        case "Aujourd'hui":
-          return item.scheduledStart
-            ? new Date(item.scheduledStart).toDateString() === new Date().toDateString()
-            : false;
-        case 'À venir':
-          return item.scheduledStart ? new Date(item.scheduledStart) > new Date() : false;
-        case 'Urgent':
-          return item.isUrgent;
-        case 'Terminés':
-          return item.completed;
-        default:
-          return true;
-      }
-    });
-  }, [data, search, activeFilter, barcodeFilter, selectedDate]);
+    if (selectedDate) {
+      if (!item.scheduledStart) return false;
+      const woDate = new Date(item.scheduledStart);
+      if (!isSameDay(woDate, selectedDate)) return false;
+    }
 
+    switch (activeFilter) {
+      case 'Tous':
+        return true;
+      case "Aujourd'hui":
+        return item.scheduledStart
+          ? new Date(item.scheduledStart).toDateString() === new Date().toDateString()
+          : false;
+      case 'À venir':
+        return item.scheduledStart ? new Date(item.scheduledStart) > new Date() : false;
+      case 'Urgent':
+        return item.isUrgent;
+      case 'Terminés':
+        return item.completed;
+      default:
+        return true;
+    }
+  });
+}, [data, search, activeFilter, barcodeFilter, selectedDate]);
   const todayCount = useMemo(() => {
     const todayStr = new Date().toDateString();
     return data.filter(

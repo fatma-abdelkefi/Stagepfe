@@ -1,6 +1,5 @@
 // src/viewmodels/LoginViewModel.ts
 import { useState } from 'react';
-import { Alert } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { login } from '../services/authService';
@@ -21,13 +20,16 @@ export function useLoginViewModel(navigation: LoginScreenNavigationProp) {
     setSecurePassword(prev => !prev);
   };
 
-  const handleLogin = async () => {
+  // ✅ returns result so the screen can show ErrorModal
+  const handleLogin = async (): Promise<{ ok: true } | { ok: false; message: string }> => {
     const u = username.trim();
     const p = password;
 
     if (!u || !p) {
-      Alert.alert('Erreur', 'Veuillez saisir nom d’utilisateur et mot de passe');
-      return;
+      return {
+        ok: false,
+        message: 'Veuillez saisir nom d’utilisateur et mot de passe',
+      };
     }
 
     try {
@@ -48,9 +50,14 @@ export function useLoginViewModel(navigation: LoginScreenNavigationProp) {
         routes: [{ name: 'WorkOrders' }],
       });
 
+      return { ok: true };
     } catch (error: any) {
       console.log('DEBUG: Login failed:', error?.message);
-      Alert.alert('Échec de connexion', error?.message || 'Erreur inconnue');
+
+      return {
+        ok: false,
+        message: error?.message || 'Erreur inconnue',
+      };
     } finally {
       setLoading(false);
     }

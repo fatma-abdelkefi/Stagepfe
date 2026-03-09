@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import {
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
 import { useLoginViewModel } from '../viewmodels/LoginViewModel';
+import ErrorModal from '../components/ErrorModal'; // ✅ add this
 
 export default function LoginScreen({ navigation }: any) {
   const {
@@ -27,6 +28,34 @@ export default function LoginScreen({ navigation }: any) {
     handleLogin,
     loading,
   } = useLoginViewModel(navigation);
+
+  // ✅ Error modal state
+  const [errorVisible, setErrorVisible] = useState(false);
+  const [errorTitle, setErrorTitle] = useState('Erreur');
+  const [errorMessage, setErrorMessage] = useState('');
+
+  // ✅ wrapper so we can catch errors and show modal
+  const onPressLogin = useCallback(async () => {
+    try {
+      const res = await handleLogin();
+
+      // If your handleLogin returns something like { ok: false, message: '...' }
+      if (res && res.ok === false) {
+        setErrorTitle('Erreur de connexion');
+        setErrorMessage(res.message || 'Identifiants invalides.');
+        setErrorVisible(true);
+      }
+    } catch (e: any) {
+      const msg =
+        e?.response?.data?.message ||
+        e?.message ||
+        "Une erreur s'est produite. Veuillez réessayer.";
+
+      setErrorTitle('Erreur de connexion');
+      setErrorMessage(msg);
+      setErrorVisible(true);
+    }
+  }, [handleLogin]);
 
   /* Animations */
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -46,7 +75,7 @@ export default function LoginScreen({ navigation }: any) {
         useNativeDriver: true,
       }),
     ]).start();
-  }, []);
+  }, [fadeAnim, slideAnim]);
 
   return (
     <KeyboardAvoidingView
@@ -54,6 +83,15 @@ export default function LoginScreen({ navigation }: any) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <StatusBar barStyle="light-content" backgroundColor="#3b82f6" />
+
+      {/* ✅ Error Modal */}
+      <ErrorModal
+        visible={errorVisible}
+        title={errorTitle}
+        message={errorMessage}
+        onClose={() => setErrorVisible(false)}
+      />
+
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -158,12 +196,9 @@ export default function LoginScreen({ navigation }: any) {
 
             {/* Login Button */}
             <TouchableOpacity
-              onPress={handleLogin}
+              onPress={onPressLogin} // ✅ changed from handleLogin
               disabled={loading}
-              style={[
-                styles.loginButton,
-                loading && styles.loginButtonDisabled,
-              ]}
+              style={[styles.loginButton, loading && styles.loginButtonDisabled]}
             >
               <LinearGradient
                 colors={['#3b82f6', '#2563eb']}
