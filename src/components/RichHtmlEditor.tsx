@@ -1,4 +1,4 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { WebView } from 'react-native-webview';
 
@@ -8,13 +8,17 @@ type Props = {
   height?: number;
 };
 
+function escapeForInjectedJs(str: string) {
+  return JSON.stringify(str ?? '');
+}
+
 export default function RichHtmlEditor({
   value = '',
   onChange,
   height = 260,
 }: Props) {
   const webRef = useRef<WebView>(null);
-  const initialHtmlRef = useRef(value);
+  const lastSentValueRef = useRef(value);
 
   const html = useMemo(
     () => `
@@ -174,15 +178,20 @@ export default function RichHtmlEditor({
     }
 
     function setHtmlPreserveCursor(newHtml) {
-      if (newHtml === lastHtml) return;
+      const nextHtml = newHtml || '';
+      if (nextHtml === lastHtml) return;
       isApplyingExternalValue = true;
-      editor.innerHTML = newHtml || '';
+      editor.innerHTML = nextHtml;
       lastHtml = editor.innerHTML;
       placeCursorAtEnd(editor);
       isApplyingExternalValue = false;
     }
 
-    editor.innerHTML = ${JSON.stringify(initialHtmlRef.current || '')};
+    window.__setEditorHtml = function(newHtml) {
+      setHtmlPreserveCursor(newHtml);
+    };
+
+    editor.innerHTML = '';
     lastHtml = editor.innerHTML;
 
     editor.addEventListener('input', function() {
@@ -208,6 +217,19 @@ export default function RichHtmlEditor({
     []
   );
 
+  useEffect(() => {
+    if (!webRef.current) return;
+    if (value === lastSentValueRef.current) return;
+
+    const injected = `
+      window.__setEditorHtml(${escapeForInjectedJs(value)});
+      true;
+    `;
+
+    webRef.current.injectJavaScript(injected);
+    lastSentValueRef.current = value;
+  }, [value]);
+
   return (
     <View style={[styles.container, { height }]}>
       <WebView
@@ -220,6 +242,14 @@ export default function RichHtmlEditor({
         keyboardDisplayRequiresUserAction={false}
         automaticallyAdjustContentInsets={false}
         scrollEnabled={false}
+        onLoadEnd={() => {
+          const injected = `
+            window.__setEditorHtml(${escapeForInjectedJs(value)});
+            true;
+          `;
+          webRef.current?.injectJavaScript(injected);
+          lastSentValueRef.current = value;
+        }}
         onMessage={(event) => {
           try {
             const data = JSON.parse(event.nativeEvent.data);

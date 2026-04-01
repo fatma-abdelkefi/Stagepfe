@@ -11,28 +11,43 @@ import {
   TouchableOpacity,
   Linking,
   AppState,
+  AppStateStatus,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { Camera } from 'react-native-vision-camera';
+
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAuth } from '../context/AuthContext';
-import { Camera } from 'react-native-vision-camera';
 
 type LaunchScreenNavigationProp = NativeStackNavigationProp<
   RootStackParamList,
   'Launch'
 >;
 
+type PermissionStatusType =
+  | 'granted'
+  | 'not-determined'
+  | 'denied'
+  | 'restricted';
+
 export default function LaunchScreen() {
   const navigation = useNavigation<LaunchScreenNavigationProp>();
   const { username, password, authLoading } = useAuth();
+
   const isLoggedIn = !!username && !!password;
 
   const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [permissionChecked, setPermissionChecked] = useState(false);
   const [animationFinished, setAnimationFinished] = useState(false);
   const [navigated, setNavigated] = useState(false);
+  const [checkingPermission, setCheckingPermission] = useState(false);
+
+  const [cameraStatus, setCameraStatus] =
+    useState<PermissionStatusType>('not-determined');
+  const [microphoneStatus, setMicrophoneStatus] =
+    useState<PermissionStatusType>('not-determined');
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.3)).current;
@@ -73,7 +88,7 @@ export default function LaunchScreen() {
           duration: 1000,
           useNativeDriver: true,
         }),
-      ])
+      ]),
     ).start();
 
     Animated.loop(
@@ -81,7 +96,7 @@ export default function LaunchScreen() {
         toValue: 1,
         duration: 10000,
         useNativeDriver: true,
-      })
+      }),
     ).start();
 
     const timer = setTimeout(() => {
@@ -94,50 +109,34 @@ export default function LaunchScreen() {
   useEffect(() => {
     if (authLoading || !animationFinished) return;
 
-    if (isLoggedIn) {
-      setPermissionChecked(true);
-      return;
-    }
+    checkPermissions();
+  }, [authLoading, animationFinished]);
 
-    checkCameraPermission();
+  useEffect(() => {
+    const subscription = AppState.addEventListener(
+      'change',
+      async (nextAppState: AppStateStatus) => {
+        if (nextAppState === 'active') {
+          try {
+            const cam = await Camera.getCameraPermissionStatus();
+            const mic = await Camera.getMicrophonePermissionStatus();
 
-    const sub = AppState.addEventListener('change', async (state) => {
-      if (state === 'active') {
-        const status = await Camera.getCameraPermissionStatus();
-        console.log('📷 camera status after returning from settings:', status);
+            setCameraStatus(cam);
+            setMicrophoneStatus(mic);
 
-        if (status === 'granted' && !navigated) {
-          setShowPermissionModal(false);
-          setPermissionChecked(true);
-          setNavigated(true);
-          navigation.replace('Login');
+            if (cam === 'granted' && mic === 'granted') {
+              setShowPermissionModal(false);
+              setPermissionChecked(true);
+            }
+          } catch (error) {
+            console.error('Error checking permissions on app active:', error);
+          }
         }
-      }
-    });
+      },
+    );
 
-    return () => sub.remove();
-  }, [authLoading, animationFinished, isLoggedIn, navigation, navigated]);
-
-  const checkCameraPermission = async () => {
-    try {
-      const status = await Camera.getCameraPermissionStatus();
-      console.log('📷 initial camera permission status:', status);
-
-      if (status === 'granted') {
-        setShowPermissionModal(false);
-        setPermissionChecked(true);
-        return;
-      }
-
-      // Show custom popup for any non-granted status
-      setShowPermissionModal(true);
-      setPermissionChecked(true);
-    } catch (error) {
-      console.error('Camera permission error:', error);
-      setShowPermissionModal(true);
-      setPermissionChecked(true);
-    }
-  };
+    return () => subscription.remove();
+  }, []);
 
   useEffect(() => {
     if (
@@ -151,12 +150,7 @@ export default function LaunchScreen() {
     }
 
     setNavigated(true);
-
-    if (isLoggedIn) {
-      navigation.replace('WorkOrders');
-    } else {
-      navigation.replace('Login');
-    }
+    navigation.replace(isLoggedIn ? 'WorkOrders' : 'Login');
   }, [
     authLoading,
     animationFinished,
@@ -166,6 +160,93 @@ export default function LaunchScreen() {
     isLoggedIn,
     navigation,
   ]);
+
+  const checkPermissions = async () => {
+    if (checkingPermission) return;
+
+    try {
+      setCheckingPermission(true);
+
+      const camStatus = await Camera.getCameraPermissionStatus();
+      const micStatus = await Camera.getMicrophonePermissionStatus();
+
+      setCameraStatus(camStatus);
+      setMicrophoneStatus(micStatus);
+
+      console.log('📷 initial camera status:', camStatus);
+      console.log('🎤 initial microphone status:', micStatus);
+
+      if (camStatus === 'granted' && micStatus === 'granted') {
+        setShowPermissionModal(false);
+        setPermissionChecked(true);
+        return;
+      }
+
+      let nextCamStatus = camStatus;
+      let nextMicStatus = micStatus;
+
+      if (camStatus !== 'granted') {
+        nextCamStatus = await Camera.requestCameraPermission();
+        setCameraStatus(nextCamStatus);
+        console.log('📷 requested camera status:', nextCamStatus);
+      }
+
+      if (micStatus !== 'granted') {
+        nextMicStatus = await Camera.requestMicrophonePermission();
+        setMicrophoneStatus(nextMicStatus);
+        console.log('🎤 requested microphone status:', nextMicStatus);
+}
+
+      if (nextCamStatus === 'granted' && nextMicStatus === 'granted') {
+        setShowPermissionModal(false);
+        setPermissionChecked(true);
+        return;
+      }
+
+      setShowPermissionModal(true);
+      setPermissionChecked(true);
+    } catch (error) {
+      console.error('Permission error:', error);
+      setShowPermissionModal(true);
+      setPermissionChecked(true);
+    } finally {
+      setCheckingPermission(false);
+    }
+  };
+
+  const handleAskPermissionAgain = async () => {
+  try {
+    let nextCamStatus = await Camera.getCameraPermissionStatus();
+    let nextMicStatus = await Camera.getMicrophonePermissionStatus();
+
+    console.log('📷 retry camera status before request:', nextCamStatus);
+    console.log('🎤 retry microphone status before request:', nextMicStatus);
+
+    if (nextCamStatus !== 'granted') {
+      nextCamStatus = await Camera.requestCameraPermission();
+    }
+
+    if (nextMicStatus !== 'granted') {
+      nextMicStatus = await Camera.requestMicrophonePermission();
+    }
+
+    setCameraStatus(nextCamStatus);
+    setMicrophoneStatus(nextMicStatus);
+
+    console.log('📷 retry camera status after request:', nextCamStatus);
+    console.log('🎤 retry microphone status after request:', nextMicStatus);
+
+    if (nextCamStatus === 'granted' && nextMicStatus === 'granted') {
+      setShowPermissionModal(false);
+      setPermissionChecked(true);
+      return;
+    }
+
+    setShowPermissionModal(true);
+  } catch (error) {
+    console.error('Failed to ask permissions again:', error);
+  }
+};
 
   const handleOpenSettings = async () => {
     try {
@@ -177,17 +258,21 @@ export default function LaunchScreen() {
 
   const handleLater = () => {
     setShowPermissionModal(false);
-
-    if (!navigated) {
-      setNavigated(true);
-      navigation.replace('Login');
-    }
+    setPermissionChecked(true);
   };
 
   const spin = rotateAnim.interpolate({
     inputRange: [0, 1],
     outputRange: ['0deg', '360deg'],
   });
+
+  const cameraGranted = cameraStatus === 'granted';
+  const microphoneGranted = microphoneStatus === 'granted';
+  const allGranted = cameraGranted && microphoneGranted;
+
+  const probablyBlocked =
+    (cameraStatus === 'denied' || microphoneStatus === 'denied') &&
+    !allGranted;
 
   return (
     <LinearGradient
@@ -254,24 +339,43 @@ export default function LaunchScreen() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
-            <Text style={styles.modalTitle}>Autorisation caméra requise</Text>
+            <Text style={styles.modalTitle}>Autorisations requises</Text>
             <Text style={styles.modalMessage}>
-              Pour utiliser le scan code-barres, veuillez autoriser l’accès à la
-              caméra dans les paramètres de l’application.
+              Pour utiliser le scan code-barres et l’enregistrement vocal,
+              veuillez autoriser l’accès à la caméra et au microphone.
             </Text>
+
+            <View style={styles.permissionBox}>
+              <Text style={styles.permissionItem}>
+                Caméra : {cameraGranted ? 'Autorisée' : 'Non autorisée'}
+              </Text>
+              <Text style={styles.permissionItem}>
+                Microphone : {microphoneGranted ? 'Autorisé' : 'Non autorisé'}
+              </Text>
+            </View>
 
             <TouchableOpacity
               style={styles.primaryButton}
-              onPress={handleOpenSettings}
+              onPress={handleAskPermissionAgain}
             >
-              <Text style={styles.primaryButtonText}>Ouvrir les paramètres</Text>
+              <Text style={styles.primaryButtonText}>
+                Autoriser maintenant
+              </Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={handleLater}
-            >
-              <Text style={styles.secondaryButtonText}>Plus tard</Text>
+            {probablyBlocked && (
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={handleOpenSettings}
+              >
+                <Text style={styles.secondaryButtonText}>
+                  Ouvrir les paramètres
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity style={styles.laterButton} onPress={handleLater}>
+              <Text style={styles.laterButtonText}>Plus tard</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -303,15 +407,23 @@ const styles = StyleSheet.create({
     left: -150,
   },
 
-  logoContainer: { marginBottom: 40 },
+  logoContainer: {
+    marginBottom: 40,
+  },
   logoGlow: {
     padding: 30,
     borderRadius: 100,
     backgroundColor: 'rgba(59, 130, 246, 0.15)',
   },
-  logo: { width: 240, height: 240, resizeMode: 'contain' },
+  logo: {
+    width: 240,
+    height: 240,
+    resizeMode: 'contain',
+  },
 
-  textContainer: { alignItems: 'center' },
+  textContainer: {
+    alignItems: 'center',
+  },
   subtitle: {
     fontSize: 18,
     fontWeight: '600',
@@ -342,7 +454,19 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#475569',
     lineHeight: 22,
-    marginBottom: 24,
+    marginBottom: 18,
+  },
+  permissionBox: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 18,
+  },
+  permissionItem: {
+    fontSize: 14,
+    color: '#0f172a',
+    fontWeight: '600',
+    marginBottom: 6,
   },
   primaryButton: {
     backgroundColor: '#2563eb',
@@ -361,9 +485,19 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
+    marginBottom: 12,
   },
   secondaryButtonText: {
     color: '#0f172a',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  laterButton: {
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  laterButtonText: {
+    color: '#64748b',
     fontSize: 15,
     fontWeight: '600',
   },

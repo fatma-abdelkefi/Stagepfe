@@ -14,37 +14,84 @@ type Props = {
   onReady: () => void;
 };
 
+type PermissionState = {
+  camera: 'granted' | 'denied' | 'not-determined' | 'restricted';
+  microphone: 'granted' | 'denied' | 'not-determined' | 'restricted';
+};
+
 export default function CameraPermissionGate({ onReady }: Props) {
   const [loading, setLoading] = useState(true);
   const [showPermissionModal, setShowPermissionModal] = useState(false);
+  const [permissions, setPermissions] = useState<PermissionState>({
+    camera: 'not-determined',
+    microphone: 'not-determined',
+  });
 
   useEffect(() => {
-    checkPermission();
+    checkPermissions();
   }, []);
 
-  const checkPermission = async () => {
+  const checkPermissions = async () => {
     try {
-      const status = await Camera.getCameraPermissionStatus();
+      const cameraStatus = await Camera.getCameraPermissionStatus();
+      const microphoneStatus = await Camera.getMicrophonePermissionStatus();
 
-      if (status === 'granted') {
+      const nextPermissions: PermissionState = {
+        camera: cameraStatus,
+        microphone: microphoneStatus,
+      };
+
+      setPermissions(nextPermissions);
+
+      if (cameraStatus === 'granted' && microphoneStatus === 'granted') {
         setShowPermissionModal(false);
         onReady();
         return;
       }
 
-      if (status === 'not-determined') {
-        const newStatus = await Camera.requestCameraPermission();
+      setShowPermissionModal(true);
+    } catch (error) {
+      console.error('Permission check error:', error);
+      setShowPermissionModal(true);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-        if (newStatus === 'granted') {
-          setShowPermissionModal(false);
-          onReady();
-          return;
-        }
+  const requestPermissions = async () => {
+    try {
+      setLoading(true);
+
+      let cameraStatus = permissions.camera;
+      let microphoneStatus = permissions.microphone;
+
+      if (cameraStatus !== 'granted') {
+        cameraStatus = await Camera.requestCameraPermission();
+      }
+
+      if (microphoneStatus !== 'granted') {
+        microphoneStatus = await Camera.requestMicrophonePermission();
+      }
+
+      const nextPermissions: PermissionState = {
+        camera: cameraStatus,
+        microphone: microphoneStatus,
+      };
+
+      setPermissions(nextPermissions);
+
+      const allGranted =
+        cameraStatus === 'granted' && microphoneStatus === 'granted';
+
+      if (allGranted) {
+        setShowPermissionModal(false);
+        onReady();
+        return;
       }
 
       setShowPermissionModal(true);
     } catch (error) {
-      console.error('Camera permission error:', error);
+      console.error('Permission request error:', error);
       setShowPermissionModal(true);
     } finally {
       setLoading(false);
@@ -64,6 +111,9 @@ export default function CameraPermissionGate({ onReady }: Props) {
     onReady();
   };
 
+  const isBlocked =
+    permissions.camera === 'denied' || permissions.microphone === 'denied';
+
   if (loading) {
     return (
       <View style={styles.loaderContainer}>
@@ -76,17 +126,36 @@ export default function CameraPermissionGate({ onReady }: Props) {
     <Modal visible={showPermissionModal} transparent animationType="fade">
       <View style={styles.overlay}>
         <View style={styles.modal}>
-          <Text style={styles.title}>Permission caméra requise</Text>
+          <Text style={styles.title}>Permissions requises</Text>
+
           <Text style={styles.message}>
-            Cette application a besoin de l'accès à la caméra pour scanner les codes-barres.
-            Veuillez autoriser l'accès dans les paramètres de l'application.
+            Cette application a besoin de l’accès à la caméra pour scanner les codes-barres
+            et du microphone pour l’enregistrement audio.
           </Text>
 
-          <TouchableOpacity style={styles.primaryButton} onPress={handleOpenSettings}>
-            <Text style={styles.primaryButtonText}>Ouvrir les paramètres</Text>
+          <View style={styles.permissionBox}>
+            <Text style={styles.permissionItem}>
+              Caméra : {permissions.camera === 'granted' ? 'Autorisée' : 'Non autorisée'}
+            </Text>
+            <Text style={styles.permissionItem}>
+              Microphone : {permissions.microphone === 'granted' ? 'Autorisé' : 'Non autorisé'}
+            </Text>
+          </View>
+
+          <TouchableOpacity style={styles.primaryButton} onPress={requestPermissions}>
+            <Text style={styles.primaryButtonText}>Autoriser maintenant</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.secondaryButton} onPress={handleContinueWithoutPermission}>
+          {isBlocked && (
+            <TouchableOpacity style={styles.settingsButton} onPress={handleOpenSettings}>
+              <Text style={styles.settingsButtonText}>Ouvrir les paramètres</Text>
+            </TouchableOpacity>
+          )}
+
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            onPress={handleContinueWithoutPermission}
+          >
             <Text style={styles.secondaryButtonText}>Continuer vers connexion</Text>
           </TouchableOpacity>
         </View>
@@ -125,7 +194,19 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#4B5563',
     lineHeight: 22,
-    marginBottom: 24,
+    marginBottom: 16,
+  },
+  permissionBox: {
+    backgroundColor: '#F3F4F6',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 20,
+  },
+  permissionItem: {
+    fontSize: 14,
+    color: '#111827',
+    fontWeight: '600',
+    marginBottom: 6,
   },
   primaryButton: {
     backgroundColor: '#0A74DA',
@@ -135,6 +216,18 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   primaryButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 15,
+  },
+  settingsButton: {
+    backgroundColor: '#F59E0B',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  settingsButtonText: {
     color: '#fff',
     fontWeight: '700',
     fontSize: 15,

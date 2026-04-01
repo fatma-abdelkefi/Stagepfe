@@ -18,6 +18,8 @@ import DocViewerScreen from '../views/DocViewerScreen';
 import DetailsActualLaborScreen from '../views/DetailsActualLaborScreen';
 import DetailsActualMaterialsScreen from '../views/DetailsActualMaterialsScreen';
 import DetailsWorkLogScreen from '../views/DetailsWorkLogScreen';
+import FailureReportingScreen from '../views/FailureReportingScreen';
+import FailureReportingDetailsScreen from '../views/FailureReportingDetailsScreen';
 
 // Add screens
 import AddMaterialScreen from '../views/AddMaterialScreen';
@@ -33,6 +35,8 @@ import { useAuth } from '../context/AuthContext';
 export type RootStackParamList = {
   Launch: undefined;
   Login: undefined;
+  FailureReporting: { workOrder: WorkOrder };
+  FailureReportingDetails: { workOrder: WorkOrder };
 
   WorkOrders: undefined;
   WorkOrderDetails: { workOrder: WorkOrder };
@@ -139,10 +143,21 @@ export default function AppNavigator() {
           <Stack.Screen name="AddActualLabor" component={AddActualLaborScreen} />
 
           <Stack.Screen
+            name="FailureReporting"
+            component={FailureReportingScreen}
+            options={{ title: 'Signalement de panne' }}
+          />
+          <Stack.Screen
+            name="FailureReportingDetails"
+            component={FailureReportingDetailsScreen}
+            options={{ title: 'Failure Reporting' }}
+          />
+          <Stack.Screen
             name="DetailsWorkLog"
             component={DetailsWorkLogScreen}
             options={{ title: 'Work log' }}
           />
+
           <Stack.Screen
             name="AddWorkLog"
             component={AddWorkLogScreen}

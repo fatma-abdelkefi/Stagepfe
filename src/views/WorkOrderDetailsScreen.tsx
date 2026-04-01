@@ -19,24 +19,43 @@ import LinearGradient from 'react-native-linear-gradient';
 
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useWorkOrderDetails } from '../viewmodels/WorkOrderDetailsViewModel';
+import { useWorkOrderFailureReport } from '../viewmodels/useWorkOrderFailureReport';
 import { useAuth } from '../context/AuthContext';
 import StatusChangeModal from '../components/StatusChangeModal';
 import { rewriteMaximoUrl } from '../services/rewriteMaximoUrl';
+import { getFrenchStatusLabel } from '../services/statusService';
 
 type Props = { route: RouteProp<RootStackParamList, 'WorkOrderDetails'> };
-
-// ✅ IMPORTANT: navigation must be typed for the whole stack
 type NavProp = NativeStackNavigationProp<RootStackParamList>;
 
-const CATEGORIES = [
-  { key: 'Activités', icon: 'list', gradient: ['#124aa5', '#0b4bd4'] },
-  { key: 'Documents', icon: 'file-text', gradient: ['#124aa5', '#0b4bd4'] },
-  { key: "Main d'œuvre planifiée", icon: 'users', gradient: ['#93c5fd', '#3b82f6'] },
-  { key: "Main d'œuvre réelle", icon: 'user-check', gradient: ['#005ed1', '#0ea5e9'] },
-  { key: 'Matériel planifié', icon: 'package', gradient: ['#93c5fd', '#3b82f6'] },
-  { key: 'Matériel réel', icon: 'clipboard', gradient: ['#005ed1', '#0ea5e9'] },
-  { key: 'Work log', icon: 'clock', gradient: ['#124aa5', '#93c5fd'] },
-];
+const CATEGORY_SECTIONS = [
+  {
+    title: 'Planification',
+    items: [
+      { key: 'Activités', icon: 'list', gradient: ['#124aa5', '#0b4bd4'] },
+      { key: "Main d'œuvre planifiée", icon: 'users', gradient: ['#93c5fd', '#3b82f6'] },
+      { key: 'Matériel planifié', icon: 'package', gradient: ['#93c5fd', '#3b82f6'] },
+    ],
+  },
+  {
+    title: 'Attachements',
+    items: [{ key: 'Documents', icon: 'file-text', gradient: ['#124aa5', '#0b4bd4'] }],
+  },
+  {
+    title: 'Réelle',
+    items: [
+      { key: "Main d'œuvre réelle", icon: 'user-check', gradient: ['#005ed1', '#0ea5e9'] },
+      { key: 'Matériel réel', icon: 'clipboard', gradient: ['#005ed1', '#0ea5e9'] },
+      { key: 'Work log', icon: 'clock', gradient: ['#124aa5', '#93c5fd'] },
+    ],
+  },
+  {
+    title: 'Signalement de défaillances',
+    items: [
+      { key: "Détails de l'échec", icon: 'alert-triangle', gradient: ['#242b97', '#409ff7'] },
+    ],
+  },
+] as const;
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
@@ -65,32 +84,52 @@ function normalizeHref(href: any): string {
   return u;
 }
 
+function getDisplayStatusLabel(status?: string, fallbackLabel?: string) {
+  return getFrenchStatusLabel(status, fallbackLabel);
+}
+
 export default function WorkOrderDetailsScreen({ route }: Props) {
-  // Keep params stable
-  const woParam = (route as any)?.params?.workOrder;
+  const woParam = route.params?.workOrder;
   const wonum = safeTrim(woParam?.wonum ?? '');
 
   const navigation = useNavigation<NavProp>();
   const { width } = useWindowDimensions();
 
   const { username, password, authLoading } = useAuth();
-
-  // ✅ Safe even when wonum === '' (because hook is fixed)
   const { workOrder: details, loading, error, refresh } = useWorkOrderDetails(wonum);
+
+  const siteidForFailure = safeTrim((details as any)?.siteid || woParam?.siteid || '');
+  const {
+  data: currentFailureReport,
+  loading: loadingFailureReport,
+  refresh: refreshFailureReport,
+} = useWorkOrderFailureReport(wonum, siteidForFailure);
+
+  const hasFailureReport = useMemo(() => {
+    if (!currentFailureReport) return false;
+
+    return !!(
+      safeTrim(currentFailureReport.failureClass) ||
+      safeTrim((currentFailureReport as any).problem) ||
+      safeTrim((currentFailureReport as any).cause) ||
+      safeTrim((currentFailureReport as any).remedy) ||
+      (Array.isArray(currentFailureReport.codes) && currentFailureReport.codes.length > 0)
+    );
+  }, [currentFailureReport]);
 
   const [statusModalVisible, setStatusModalVisible] = useState(false);
   const [currentStatus, setCurrentStatus] = useState(woParam?.status ?? '');
   const [currentStatusLabel, setCurrentStatusLabel] = useState(
-    safeTrim((woParam as any)?.status_description) || woParam?.status || ''
+    safeTrim((woParam as any)?.status_description) || woParam?.status || '',
   );
 
   const layout = useMemo(() => {
     const sidePadding = clamp(Math.round(width * 0.05), 14, 24);
-    const gap = clamp(Math.round(width * 0.04), 12, 18);
+    const gap = clamp(Math.round(width * 0.03), 8, 12);
     const columns = 2;
     const contentWidth = width - sidePadding * 2;
     const cardWidth = (contentWidth - gap * (columns - 1)) / columns;
-    const cardHeight = clamp(cardWidth, 140, 220);
+    const cardHeight = clamp(cardWidth * 0.8, 112, 150);
     return { sidePadding, gap, columns, cardWidth, cardHeight };
   }, [width]);
 
@@ -98,19 +137,18 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
   const rawHref = useMemo(() => safeTrim((details as any)?.href ?? ''), [details]);
   const cleanWoHref = useMemo(() => normalizeHref(rawHref), [rawHref]);
 
-  // Sync status label from API response
   useEffect(() => {
     if (details?.status) {
       const labelFromApi =
         safeTrim((details as any)?.status_description) ||
         safeTrim((details as any)?.statusDescription) ||
         '';
-      setCurrentStatus(details.status);
-      setCurrentStatusLabel(labelFromApi || details.status);
-    }
-  }, [details?.status, (details as any)?.status_description, (details as any)?.statusDescription]);
 
-  // Auth guard
+      setCurrentStatus(details.status);
+      setCurrentStatusLabel(getFrenchStatusLabel(details.status, labelFromApi));
+    }
+  }, [details]);
+
   useEffect(() => {
     if (authLoading) return;
     if (!username || !password) {
@@ -119,17 +157,19 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
     }
   }, [authLoading, username, password, navigation]);
 
-  // Refresh on focus — safe guard inside callback
   useFocusEffect(
-    useCallback(() => {
-      if (authLoading || !wonum) return;
-      refresh();
-    }, [authLoading, wonum, refresh])
-  );
+  useCallback(() => {
+    if (authLoading || !wonum) return;
+
+    refresh();
+    refreshFailureReport();
+  }, [authLoading, wonum, refresh, refreshFailureReport]),
+);
 
   const getCategoryCount = useCallback(
     (category: string) => {
       if (!details) return 0;
+
       switch (category) {
         case 'Activités':
           return details.activities?.length ?? 0;
@@ -145,11 +185,14 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
           return (details as any).docLinks?.length ?? 0;
         case 'Work log':
           return (details as any).workLogs?.length ?? (details as any).worklog?.length ?? 0;
+        case "Détails de l'échec":
+          if (loadingFailureReport) return 0;
+          return hasFailureReport ? 1 : 0;
         default:
           return 0;
       }
     },
-    [details]
+    [details, hasFailureReport, loadingFailureReport],
   );
 
   const onPressStatus = useCallback(() => {
@@ -161,7 +204,169 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
     setStatusModalVisible(true);
   }, [statusLocked, cleanWoHref]);
 
-  // ── Early returns (all hooks above) ─────────────────────────────────────────
+  const handleCategoryPress = useCallback(
+  (categoryKey: string) => {
+    if (!details) return;
+
+    if (categoryKey === 'Activités') {
+      navigation.navigate('DetailsActivities', { workOrder: details });
+      return;
+    }
+
+    if (categoryKey === 'Documents') {
+      navigation.navigate('DetailsDocuments', { workOrder: details });
+      return;
+    }
+
+    if (categoryKey === "Main d'œuvre planifiée") {
+      navigation.navigate('DetailsLabor', { workOrder: details });
+      return;
+    }
+
+    if (categoryKey === "Main d'œuvre réelle") {
+      const hrefToSend =
+        cleanWoHref || rawHref || String((details as any)?.href ?? '').trim();
+
+      navigation.navigate('DetailsActualLabor', {
+        workOrder: details,
+        woHref: hrefToSend,
+      });
+      return;
+    }
+
+    if (categoryKey === 'Matériel planifié') {
+      navigation.navigate('DetailsMaterials', { workOrder: details });
+      return;
+    }
+
+    if (categoryKey === 'Matériel réel') {
+      const hrefToSend =
+        cleanWoHref || rawHref || String((details as any)?.href ?? '').trim();
+
+      navigation.navigate('DetailsActualMaterials', {
+        workOrder: details,
+        woHref: hrefToSend,
+      });
+      return;
+    }
+
+    if (categoryKey === 'Work log') {
+      navigation.navigate('DetailsWorkLog', { workOrder: details });
+      return;
+    }
+
+    if (categoryKey === "Détails de l'échec") {
+      if (hasFailureReport) {
+        navigation.navigate('FailureReportingDetails', {
+          workOrder: details,
+        });
+      } else {
+        navigation.navigate('FailureReporting', {
+          workOrder: details,
+        });
+      }
+    }
+  },
+  [details, navigation, cleanWoHref, rawHref, hasFailureReport],
+);
+
+  const handlePlusPress = useCallback(
+    (categoryKey: string) => {
+      if (!details) return;
+
+      if (categoryKey === 'Matériel réel') {
+        const hrefToSend =
+          cleanWoHref || rawHref || String((details as any)?.href ?? '').trim();
+
+        if (!hrefToSend) {
+          Alert.alert('Erreur', 'href OT manquant');
+          return;
+        }
+
+        navigation.navigate('AddActualMaterial' as any, {
+          wonum: details.wonum,
+          siteid: details.siteid,
+          woHref: hrefToSend,
+        });
+        return;
+      }
+
+      if (categoryKey === "Main d'œuvre réelle") {
+        const hrefToSend =
+          cleanWoHref || rawHref || String((details as any)?.href ?? '').trim();
+
+        if (!hrefToSend) {
+          Alert.alert('Erreur', 'href OT manquant');
+          return;
+        }
+
+        navigation.navigate('AddActualLabor' as any, {
+          wonum: details.wonum,
+          siteid: details.siteid,
+          woHref: hrefToSend,
+        });
+        return;
+      }
+
+      if (categoryKey === 'Matériel planifié') {
+        navigation.navigate('AddMaterial', {
+          wonum: details.wonum,
+          workorderid: details.workorderid,
+          siteid: details.siteid,
+          status: details.status,
+          ishistory: (details as any).ishistory,
+        });
+        return;
+      }
+
+      if (categoryKey === "Main d'œuvre planifiée") {
+        if (!details.workorderid || !details.siteid) {
+          Alert.alert('Erreur', 'workorderid / siteid manquant');
+          return;
+        }
+
+        navigation.navigate('AddLabor', {
+          workorderid: details.workorderid,
+          siteid: details.siteid,
+        });
+        return;
+      }
+
+      if (categoryKey === 'Documents') {
+        if (!details.workorderid || !details.siteid) {
+          Alert.alert('Erreur', 'workorderid / siteid manquant');
+          return;
+        }
+
+        navigation.navigate('AddDoclink', {
+          ownerid: details.workorderid,
+          siteid: details.siteid,
+        });
+        return;
+      }
+
+      if (categoryKey === 'Work log') {
+        const ref = safeTrim((details as any).worklog_collectionref || '');
+        if (!ref) {
+          Alert.alert('Erreur', 'worklog_collectionref manquant');
+          return;
+        }
+
+        navigation.navigate('AddWorkLog', {
+          worklogCollectionRef: ref,
+          wonum: details.wonum,
+        });
+        return;
+      }
+
+      if (categoryKey === "Détails de l'échec") {
+        navigation.navigate('FailureReporting', {
+          workOrder: details,
+        });
+      }
+    },
+    [details, navigation, cleanWoHref, rawHref],
+  );
 
   if (!wonum) {
     return (
@@ -218,17 +423,23 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
     );
   }
 
-  // ── Main render ─────────────────────────────────────────────────────────────
-
   const assetCode = safeTrim((details as any).asset || '');
-  const assetDesc = safeTrim((details as any).assetDescription || (details as any).asset_description || '');
+  const assetDesc = safeTrim(
+    (details as any).assetDescription || (details as any).asset_description || '',
+  );
   const locCode = safeTrim((details as any).location || '');
-  const locDesc = safeTrim((details as any).locationDescription || (details as any).location_description || '');
+  const locDesc = safeTrim(
+    (details as any).locationDescription || (details as any).location_description || '',
+  );
+  const statusDisplayLabel = getDisplayStatusLabel(currentStatus, currentStatusLabel);
+  const startDate = details.scheduledStart ? String(details.scheduledStart) : 'Non planifié';
+  const finishDate = (details as any).actualFinish
+    ? String((details as any).actualFinish)
+    : 'Non planifié';
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* ✅ Header NOT fixed anymore: it's inside the same ScrollView */}
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 18 }}>
         <LinearGradient
           colors={['#3b82f6', '#2563eb', '#1e40af']}
           start={{ x: 0, y: 0 }}
@@ -237,19 +448,21 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
             styles.header,
             {
               paddingHorizontal: layout.sidePadding,
-              paddingTop: Platform.OS === 'android' ? 6 : 8, // ✅ smaller
+              paddingTop: Platform.OS === 'android' ? 6 : 8,
             },
           ]}
         >
           <View style={styles.headerTop}>
-            {/* ✅ Changed icon + smaller button */}
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} activeOpacity={0.8}>
+            <TouchableOpacity
+              onPress={() => navigation.goBack()}
+              style={styles.backButton}
+              activeOpacity={0.8}
+            >
               <FeatherIcon name="chevron-left" size={24} color="#fff" />
             </TouchableOpacity>
 
             <Text style={styles.headerTitle}>Détails OT</Text>
 
-            {/* ✅ Removed right square (no carré) – just invisible spacer */}
             <View style={styles.headerRightSpacer} />
           </View>
 
@@ -261,34 +474,27 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
               </View>
 
               <View style={styles.badgesRow}>
-                {details.isUrgent && !details.completed && (
+                {details.isUrgent && !statusLocked && (
                   <View style={[styles.statusBadge, { backgroundColor: '#fee2e2' }]}>
-                    <FeatherIcon name="alert-circle" size={14} color="#dc2626" />
+                    <FeatherIcon name="alert-circle" size={13} color="#dc2626" />
                     <Text style={[styles.statusBadgeText, { color: '#dc2626' }]}>Urgent</Text>
-                  </View>
-                )}
-
-                {details.completed && (
-                  <View style={[styles.statusBadge, { backgroundColor: '#dbeafe' }]}>
-                    <FeatherIcon name="check-circle" size={14} color="#2563eb" />
-                    <Text style={[styles.statusBadgeText, { color: '#2563eb' }]}>Terminé</Text>
                   </View>
                 )}
 
                 {statusLocked ? (
                   <View style={styles.statusReadOnly}>
-                    <FeatherIcon name="lock" size={13} color="#2563eb" />
-                    <Text style={styles.statusReadOnlyText}>
-                      {currentStatusLabel || currentStatus || '-'}
-                    </Text>
+                    <FeatherIcon name="lock" size={12} color="#2563eb" />
+                    <Text style={styles.statusReadOnlyText}>{statusDisplayLabel}</Text>
                   </View>
                 ) : (
-                  <TouchableOpacity onPress={onPressStatus} style={styles.statusChangeBtn} activeOpacity={0.8}>
-                    <FeatherIcon name="refresh-cw" size={13} color="#2563eb" />
-                    <Text style={styles.statusChangeBtnText}>
-                      {currentStatusLabel || currentStatus || '-'}
-                    </Text>
-                    <FeatherIcon name="chevron-down" size={13} color="#2563eb" />
+                  <TouchableOpacity
+                    onPress={onPressStatus}
+                    style={styles.statusChangeBtn}
+                    activeOpacity={0.8}
+                  >
+                    <FeatherIcon name="refresh-cw" size={12} color="#2563eb" />
+                    <Text style={styles.statusChangeBtnText}>{statusDisplayLabel}</Text>
+                    <FeatherIcon name="chevron-down" size={12} color="#2563eb" />
                   </TouchableOpacity>
                 )}
               </View>
@@ -296,213 +502,113 @@ export default function WorkOrderDetailsScreen({ route }: Props) {
 
             <Text style={styles.description}>{details.description || 'Aucune description'}</Text>
 
-            <View style={styles.infoGrid}>
-              <View style={styles.infoItem}>
-                <FeatherIcon name="tool" size={15} color="#3b82f6" />
-                <View style={styles.infoTextWrap}>
-                  <Text style={styles.infoValue}>
-                    {assetCode ? assetCode : 'Non renseigné'}
-                  </Text>
-                  <Text style={styles.infoSubValue}>
-                    {assetDesc ? assetDesc : 'Aucune description'}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.infoItem}>
-                <FeatherIcon name="map-pin" size={15} color="#3b82f6" />
-                <View style={styles.infoTextWrap}>
-                  <Text style={styles.infoValue}>
-                    {locCode ? locCode : 'Emplacement non renseigné'}
-                  </Text>
-                  <Text style={styles.infoSubValue}>
-                    {locDesc ? locDesc : 'Aucune description'}
-                  </Text>
-                </View>
+            <View style={styles.infoLine}>
+              <FeatherIcon name="tool" size={14} color="#3b82f6" />
+              <View style={styles.infoLineText}>
+                <Text style={styles.infoValue}>{assetCode ? assetCode : 'Non renseigné'}</Text>
+                <Text style={styles.infoSubValue}>
+                  {assetDesc ? assetDesc : 'Aucune description'}
+                </Text>
               </View>
             </View>
 
-            <View style={styles.infoGrid}>
-              <View style={styles.infoItem}>
-                <FeatherIcon name="calendar" size={15} color="#3b82f6" />
-                <View style={styles.infoTextWrap}>
-                  <Text style={styles.infoLabel}>Début prévu</Text>
-                  <Text style={styles.infoValue}>
-                    {details.scheduledStart ? String(details.scheduledStart) : 'Non planifié'}
-                  </Text>
+            <View style={styles.infoLine}>
+              <FeatherIcon name="map-pin" size={14} color="#3b82f6" />
+              <View style={styles.infoLineText}>
+                <Text style={styles.infoValue}>
+                  {locCode ? locCode : 'Emplacement non renseigné'}
+                </Text>
+                <Text style={styles.infoSubValue}>{locDesc ? locDesc : 'Aucune description'}</Text>
+              </View>
+            </View>
+
+            <View style={styles.datesRow}>
+              <View style={styles.dateItem}>
+                <FeatherIcon name="calendar" size={13} color="#3b82f6" />
+                <View style={styles.dateTextWrap}>
+                  <Text style={styles.dateLabel}>Début prévu</Text>
+                  <Text style={styles.dateValue}>{startDate}</Text>
                 </View>
               </View>
 
-              <View style={styles.infoItem}>
-                <FeatherIcon name="check-square" size={15} color="#3b82f6" />
-                <View style={styles.infoTextWrap}>
-                  <Text style={styles.infoLabel}>Fin prévue</Text>
-                  <Text style={styles.infoValue}>
-                    {(details as any).actualFinish ? String((details as any).actualFinish) : 'Non planifié'}
-                  </Text>
+              <View style={styles.dateItem}>
+                <FeatherIcon name="check-square" size={13} color="#3b82f6" />
+                <View style={styles.dateTextWrap}>
+                  <Text style={styles.dateLabel}>Fin prévue</Text>
+                  <Text style={styles.dateValue}>{finishDate}</Text>
                 </View>
               </View>
             </View>
           </View>
         </LinearGradient>
 
-        {/* ✅ Content continues below header, all scrolling together */}
-        <View style={{ paddingHorizontal: layout.sidePadding, paddingTop: 18 }}>
-          <Text style={styles.sectionTitle}>Catégories</Text>
+        <View style={{ paddingHorizontal: layout.sidePadding, paddingTop: 10 }}>
+          {CATEGORY_SECTIONS.map((section) => (
+            <View key={section.title} style={styles.sectionBlock}>
+              <Text style={styles.sectionTitle}>{section.title}</Text>
 
-          <View style={[styles.categoryGrid, { columnGap: layout.gap, rowGap: layout.gap }]}>
-            {CATEGORIES.map((category) => {
-              const count = getCategoryCount(category.key);
+              <View style={[styles.categoryGrid, { columnGap: layout.gap, rowGap: layout.gap }]}>
+                {section.items.map((category) => {
+                  const count = getCategoryCount(category.key);
+                  const showPlus =
+                    category.key === "Main d'œuvre réelle" ||
+                    category.key === 'Matériel réel' ||
+                    category.key === "Main d'œuvre planifiée" ||
+                    category.key === 'Matériel planifié' ||
+                    category.key === 'Documents' ||
+                    category.key === 'Work log' ||
+                    (category.key === "Détails de l'échec" && !hasFailureReport);
 
-              return (
-                <TouchableOpacity
-                  key={category.key}
-                  style={[styles.categoryCard, { width: layout.cardWidth, height: layout.cardHeight }]}
-                  activeOpacity={0.8}
-                  onPress={() => {
-                    if (category.key === 'Activités') {
-                      navigation.navigate('DetailsActivities', { workOrder: details });
-                    } else if (category.key === 'Documents') {
-                      navigation.navigate('DetailsDocuments', { workOrder: details });
-                    } else if (category.key === "Main d'œuvre planifiée") {
-                      navigation.navigate('DetailsLabor', { workOrder: details });
-                    } else if (category.key === "Main d'œuvre réelle") {
-                      const hrefToSend = cleanWoHref || rawHref || String((details as any)?.href ?? '').trim();
-                      navigation.navigate('DetailsActualLabor', {
-                        workOrder: details,
-                        woHref: hrefToSend,
-                      });
-                    } else if (category.key === 'Matériel planifié') {
-                      navigation.navigate('DetailsMaterials', { workOrder: details });
-                    } else if (category.key === 'Matériel réel') {
-                      const hrefToSend = cleanWoHref || rawHref || String((details as any)?.href ?? '').trim();
-                      navigation.navigate('DetailsActualMaterials', {
-                        workOrder: details,
-                        woHref: hrefToSend,
-                      });
-                    } else if (category.key === 'Work log') {
-                      navigation.navigate('DetailsWorkLog', { workOrder: details });
-                    }
-                  }}
-                >
-                  <LinearGradient
-                    colors={category.gradient as any}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={styles.categoryGradient}
-                  >
-                    <View>
-                      <View style={styles.categoryIconContainer}>
-                        <FeatherIcon name={category.icon as any} size={32} color="#fff" />
-                      </View>
-                      <Text style={styles.categoryName} numberOfLines={2}>
-                        {category.key}
-                      </Text>
-                    </View>
-
-                    <View style={styles.categoryCount}>
-                      <Text style={styles.categoryCountText}>{count}</Text>
-                    </View>
-
-                    {(category.key === "Main d'œuvre réelle" ||
-                      category.key === 'Matériel réel' ||
-                      category.key === "Main d'œuvre planifiée" ||
-                      category.key === 'Matériel planifié' ||
-                      category.key === 'Documents' ||
-                      category.key === 'Work log') && (
+                  return (
+                    <View
+                      key={category.key}
+                      style={[
+                        styles.categoryCardWrap,
+                        { width: layout.cardWidth, height: layout.cardHeight },
+                      ]}
+                    >
                       <TouchableOpacity
-                        onPress={(e) => {
-                          e.stopPropagation();
-
-                          if (category.key === 'Matériel réel') {
-                            const hrefToSend = cleanWoHref || rawHref || String((details as any)?.href ?? '').trim();
-                            if (!hrefToSend) {
-                              Alert.alert('Erreur', 'href OT manquant');
-                              return;
-                            }
-
-                            navigation.navigate('AddActualMaterial' as any, {
-                              wonum: details.wonum,
-                              siteid: details.siteid,
-                              woHref: hrefToSend,
-                            });
-                            return;
-                          }
-
-                          if (category.key === "Main d'œuvre réelle") {
-                            const hrefToSend = cleanWoHref || rawHref || String((details as any)?.href ?? '').trim();
-                            if (!hrefToSend) {
-                              Alert.alert('Erreur', 'href OT manquant');
-                              return;
-                            }
-
-                            navigation.navigate('AddActualLabor' as any, {
-                              wonum: details.wonum,
-                              siteid: details.siteid,
-                              woHref: hrefToSend,
-                            });
-                            return;
-                          }
-
-                          if (category.key === 'Matériel planifié') {
-                            navigation.navigate('AddMaterial', {
-                              wonum: details.wonum,
-                              workorderid: details.workorderid,
-                              siteid: details.siteid,
-                              status: details.status,
-                              ishistory: (details as any).ishistory,
-                            });
-                            return;
-                          }
-
-                          if (category.key === "Main d'œuvre planifiée") {
-                            if (!details.workorderid || !details.siteid) {
-                              Alert.alert('Erreur', 'workorderid / siteid manquant');
-                              return;
-                            }
-                            navigation.navigate('AddLabor', {
-                              workorderid: details.workorderid,
-                              siteid: details.siteid,
-                            });
-                            return;
-                          }
-
-                          if (category.key === 'Documents') {
-                            if (!details.workorderid || !details.siteid) {
-                              Alert.alert('Erreur', 'workorderid / siteid manquant');
-                              return;
-                            }
-                            navigation.navigate('AddDoclink', {
-                              ownerid: details.workorderid,
-                              siteid: details.siteid,
-                            });
-                            return;
-                          }
-
-                          if (category.key === 'Work log') {
-                            const ref = safeTrim((details as any).worklog_collectionref || '');
-                            if (!ref) {
-                              Alert.alert('Erreur', 'worklog_collectionref manquant');
-                              return;
-                            }
-                            navigation.navigate('AddWorkLog', {
-                              worklogCollectionRef: ref,
-                              wonum: details.wonum,
-                            });
-                            return;
-                          }
-                        }}
-                        style={styles.plusButton}
-                        activeOpacity={0.85}
+                        style={styles.categoryCardTouch}
+                        activeOpacity={0.8}
+                        onPress={() => handleCategoryPress(category.key)}
                       >
-                        <FeatherIcon name="plus" size={20} color="#fff" />
+                        <LinearGradient
+                          colors={category.gradient as any}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 1 }}
+                          style={styles.categoryGradient}
+                        >
+                          <View>
+                            <View style={styles.categoryIconContainer}>
+                              <FeatherIcon name={category.icon as any} size={24} color="#fff" />
+                            </View>
+
+                            <Text style={styles.categoryName} numberOfLines={2}>
+                              {category.key}
+                            </Text>
+                          </View>
+
+                          <View style={styles.categoryCount}>
+                            <Text style={styles.categoryCountText}>{count}</Text>
+                          </View>
+                        </LinearGradient>
                       </TouchableOpacity>
-                    )}
-                  </LinearGradient>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+
+                      {showPlus && (
+                        <TouchableOpacity
+                          onPress={() => handlePlusPress(category.key)}
+                          style={styles.plusButton}
+                          activeOpacity={0.9}
+                        >
+                          <FeatherIcon name="plus" size={18} color="#fff" />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+          ))}
         </View>
       </ScrollView>
 
@@ -536,7 +642,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#1e3a8a',
   },
-  loadingText: { marginTop: 16, fontSize: 16, color: '#3b82f6', fontWeight: '600' },
+  loadingText: { marginTop: 10, fontSize: 15, color: '#dbeafe', fontWeight: '600' },
 
   errorContainer: {
     flex: 1,
@@ -549,23 +655,22 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#64748b',
     textAlign: 'center',
-    marginTop: 16,
-    marginBottom: 24,
-    lineHeight: 22,
+    marginTop: 14,
+    marginBottom: 20,
+    lineHeight: 20,
   },
-  retryButton: { borderRadius: 12, overflow: 'hidden' },
+  retryButton: { borderRadius: 10, overflow: 'hidden' },
   retryButtonGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingHorizontal: 24,
-    paddingVertical: 14,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
   },
-  retryButtonText: { fontSize: 16, fontWeight: '700', color: '#fff' },
+  retryButtonText: { fontSize: 14, fontWeight: '700', color: '#fff' },
 
-  // ✅ smaller header
   header: {
-    paddingBottom: 9, // smaller
+    paddingBottom: 8,
     borderBottomLeftRadius: 18,
     borderBottomRightRadius: 18,
   },
@@ -573,7 +678,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 4, // smaller
+    marginBottom: 4,
   },
   backButton: {
     width: 32,
@@ -593,23 +698,23 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.98)',
     borderRadius: 10,
     padding: 10,
-    marginBottom: 6,
+    marginBottom: 2,
   },
   woHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 10,
+    marginBottom: 6,
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 6,
   },
-  woLabel: { fontSize: 12, color: '#64748b', fontWeight: '600' },
-  woNumber: { fontSize: 18, fontWeight: '800', color: '#3b82f6', marginTop: 2 },
+  woLabel: { fontSize: 11, color: '#64748b', fontWeight: '600' },
+  woNumber: { fontSize: 18, fontWeight: '800', color: '#3b82f6', marginTop: 1 },
 
   badgesRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6,
+    gap: 5,
     alignItems: 'center',
     justifyContent: 'flex-end',
   },
@@ -617,118 +722,178 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 11,
   },
-  statusBadgeText: { fontSize: 12, fontWeight: '700' },
+  statusBadgeText: { fontSize: 11, fontWeight: '700' },
 
   statusChangeBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: 4,
     backgroundColor: '#eff6ff',
-    borderWidth: 1.5,
+    borderWidth: 1.3,
     borderColor: '#3b82f6',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 11,
   },
-  statusChangeBtnText: { fontSize: 12, fontWeight: '700', color: '#2563eb' },
+  statusChangeBtnText: { fontSize: 11, fontWeight: '700', color: '#2563eb' },
 
   statusReadOnly: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
     backgroundColor: 'rgba(255,255,255,0.8)',
-    borderWidth: 1.5,
+    borderWidth: 1.3,
     borderColor: 'rgba(59,130,246,0.6)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 11,
   },
-  statusReadOnlyText: { fontSize: 12, fontWeight: '800', color: '#2563eb' },
+  statusReadOnlyText: { fontSize: 11, fontWeight: '800', color: '#2563eb' },
 
   description: {
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '500',
     color: '#0f172a',
-    lineHeight: 22,
-    marginBottom: 12,
+    lineHeight: 18,
+    marginBottom: 6,
   },
 
-  infoGrid: { flexDirection: 'row', gap: 12, marginBottom: 12 },
-  infoItem: {
-    flex: 1,
+  infoLine: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 8,
+    gap: 7,
     backgroundColor: '#f8fafc',
-    padding: 10,
-    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 8,
+    marginBottom: 4,
+  },
+  infoLineText: {
+    flex: 1,
     minWidth: 0,
   },
-  infoTextWrap: { flex: 1, minWidth: 0 },
-
-  // ✅ smaller words here
-  infoLabel: { fontSize: 11, color: '#64748b' },
   infoValue: {
-    fontSize: 12, // smaller
+    fontSize: 11,
     fontWeight: '700',
     color: '#0f172a',
-    flexShrink: 1,
-    flexWrap: 'wrap',
+    lineHeight: 14,
   },
   infoSubValue: {
     marginTop: 1,
-    fontSize: 10, // smaller
+    fontSize: 10,
     fontWeight: '500',
     color: '#64748b',
-    flexShrink: 1,
-    flexWrap: 'wrap',
-    lineHeight: 15,
+    lineHeight: 13,
   },
 
-  sectionTitle: { fontSize: 20, fontWeight: '800', color: '#0f172a', marginBottom: 16 },
+  datesRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 2,
+  },
+  dateItem: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    backgroundColor: '#f8fafc',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  dateTextWrap: {
+    flex: 1,
+  },
+  dateLabel: {
+    fontSize: 10,
+    color: '#64748b',
+    fontWeight: '600',
+    lineHeight: 12,
+  },
+  dateValue: {
+    fontSize: 11,
+    color: '#0f172a',
+    fontWeight: '700',
+    lineHeight: 14,
+    marginTop: 1,
+  },
 
-  categoryGrid: { flexDirection: 'row', flexWrap: 'wrap' },
-  categoryCard: { borderRadius: 30, overflow: 'hidden' },
+  sectionBlock: {
+    marginBottom: 10,
+  },
+  sectionTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#0f172a',
+    marginBottom: 8,
+  },
+
+  categoryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  categoryCardWrap: {
+    borderRadius: 20,
+    overflow: 'visible',
+    position: 'relative',
+  },
+  categoryCardTouch: {
+    flex: 1,
+    borderRadius: 20,
+    overflow: 'hidden',
+  },
   categoryGradient: {
     flex: 1,
-    padding: 20,
-    justifyContent: 'flex-start',
+    padding: 14,
+    justifyContent: 'space-between',
     position: 'relative',
   },
   plusButton: {
     position: 'absolute',
-    bottom: 16,
-    right: 16,
+    bottom: 10,
+    right: 10,
     width: 30,
     height: 30,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.3)',
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.35)',
     alignItems: 'center',
     justifyContent: 'center',
+    zIndex: 20,
+    elevation: 6,
   },
   categoryIconContainer: {
-    width: 30,
-    height: 40,
-    borderRadius: 14,
+    width: 38,
+    height: 38,
+    borderRadius: 12,
     backgroundColor: 'rgba(255,255,255,0.2)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  categoryName: { fontSize: 14, fontWeight: '700', color: '#fff', marginTop: 12 },
+  categoryName: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#fff',
+    marginTop: 8,
+    paddingRight: 24,
+  },
   categoryCount: {
     position: 'absolute',
     top: 10,
-    right: 16,
+    right: 10,
     backgroundColor: 'rgba(255,255,255,0.3)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    minWidth: 32,
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderRadius: 10,
+    minWidth: 28,
     alignItems: 'center',
   },
-  categoryCountText: { fontSize: 14, fontWeight: '800', color: '#fff' },
+  categoryCountText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#fff',
+  },
 });

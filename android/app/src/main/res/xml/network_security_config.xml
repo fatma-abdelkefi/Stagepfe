@@ -3,6 +3,6 @@
   <base-config cleartextTrafficPermitted="true" />
   <domain-config cleartextTrafficPermitted="true">
     <domain includeSubdomains="true">demo2.smartech-tn.com</domain>
-    <domain includeSubdomains="true">192.168.1.202</domain>
+    <domain includeSubdomains="true">192.168.0.45</domain>
   </domain-config>
 </network-security-config>

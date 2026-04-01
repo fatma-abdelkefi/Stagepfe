@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -9,15 +9,18 @@ import {
   Platform,
   KeyboardAvoidingView,
   ScrollView,
+  PermissionsAndroid,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { RouteProp } from '@react-navigation/native';
 import { useNavigation } from '@react-navigation/native';
 import FeatherIcon from 'react-native-vector-icons/Feather';
 import LinearGradient from 'react-native-linear-gradient';
+import Sound, { RecordBackType } from 'react-native-nitro-sound';
 
 import { useAuth } from '../context/AuthContext';
 import { addWorkLog } from '../services/worklogService';
+import { transcribeAudio } from '../services/nlpApi';
 import SuccessModal from '../components/SuccessModal';
 import ErrorModal from '../components/ErrorModal';
 import RichHtmlEditor from '../components/RichHtmlEditor';
@@ -55,6 +58,24 @@ function getCurrentDateTimeForDisplay() {
   )}:${pad2(d.getMinutes())}`;
 }
 
+function textToHtml(text: string) {
+  const safe = String(text || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br/>');
+  return `<p>${safe}</p>`;
+}
+
+function htmlToPlainText(html: string) {
+  return String(html || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .trim();
+}
+
 export default function AddWorkLogScreen({ route }: Props) {
   const navigation = useNavigation<any>();
   const { username, password, authLoading } = useAuth();
@@ -78,6 +99,13 @@ export default function AddWorkLogScreen({ route }: Props) {
   const [successVisible, setSuccessVisible] = useState(false);
   const [errorVisible, setErrorVisible] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [voiceError, setVoiceError] = useState(false);
+
+  const [recording, setRecording] = useState(false);
+  const [voiceLoading, setVoiceLoading] = useState(false);
+  const [recordedFileUri, setRecordedFileUri] = useState('');
+  const [transcript, setTranscript] = useState('');
+  const [voiceInfo, setVoiceInfo] = useState('');
 
   const canSubmit = useMemo(
     () => !!modifyworklogUrl && !!username && !!password,
@@ -87,6 +115,128 @@ export default function AddWorkLogScreen({ route }: Props) {
   const showError = (msg: string) => {
     setErrorMessage(msg);
     setErrorVisible(true);
+  };
+
+  useEffect(() => {
+    return () => {
+      Sound.stopRecorder().catch(() => {});
+      Sound.removeRecordBackListener();
+    };
+  }, []);
+
+  const requestMicPermission = async () => {
+    if (Platform.OS !== 'android') return true;
+
+    try {
+      const granted = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+        {
+          title: 'Permission microphone',
+          message: "L'application a besoin du microphone pour enregistrer la dictée.",
+          buttonPositive: 'Autoriser',
+          buttonNegative: 'Refuser',
+        }
+      );
+
+      return granted === PermissionsAndroid.RESULTS.GRANTED;
+    } catch {
+      return false;
+    }
+  };
+
+  const startRecording = async () => {
+    try {
+      const ok = await requestMicPermission();
+      if (!ok) {
+        showError('Permission microphone refusée.');
+        return;
+      }
+
+      setTranscript('');
+      setVoiceInfo('');
+      setRecordedFileUri('');
+
+      const fileName = `worklog_${Date.now()}.m4a`;
+      const path =
+        Platform.OS === 'android'
+          ? `/storage/emulated/0/Download/${fileName}`
+          : fileName;
+
+      Sound.removeRecordBackListener();
+
+      Sound.addRecordBackListener((_e: RecordBackType) => {
+        return;
+      });
+
+      const uri = await Sound.startRecorder(path);
+
+      setRecordedFileUri(uri);
+      setRecording(true);
+    } catch (e: any) {
+      setRecording(false);
+      showError(e?.message || "Impossible de démarrer l'enregistrement.");
+    }
+  };
+
+  const stopRecordingAndAnalyze = async () => {
+  try {
+    setVoiceLoading(true);
+
+    const resultUri = await Sound.stopRecorder();
+    Sound.removeRecordBackListener();
+    setRecording(false);
+
+    const finalUri = String(resultUri || recordedFileUri || '').trim();
+
+    if (!finalUri) {
+      showError('Fichier audio introuvable.');
+      return;
+    }
+
+    const res = await transcribeAudio(finalUri, 'recording.m4a', 'audio/mp4');
+
+    const transcriptText = String(res?.transcript || '').trim();
+    const payload = res?.payload || {};
+
+    const autoDescription = String(payload?.description || '').trim();
+    const autoLongText = String(
+      payload?.description_longdescription?.ldtext || ''
+    ).trim();
+
+    setTranscript(transcriptText);
+
+    if (!transcriptText) {
+      setVoiceError(true);
+      setVoiceInfo('Aucune parole détectée. Veuillez réessayer.');
+      return;
+    }
+
+    if (autoDescription) {
+      setDescription(autoDescription);
+    }
+
+    if (autoLongText) {
+      setDetailsHtml(textToHtml(autoLongText));
+    } else {
+      setDetailsHtml(textToHtml(transcriptText));
+    }
+    setVoiceError(false);
+    setVoiceInfo('La transcription a été effectuée avec succès.');
+  } catch (e: any) {
+    showError(e?.message || "Erreur pendant l'analyse vocale.");
+  } finally {
+    setVoiceLoading(false);
+  }
+};
+
+  const onVoicePress = async () => {
+    if (voiceLoading) return;
+
+    if (!recording) {
+      await startRecording();
+    } else {
+      await stopRecordingAndAnalyze();
+    }
   };
 
   const onSave = async () => {
@@ -114,7 +264,7 @@ export default function AddWorkLogScreen({ route }: Props) {
         username,
         password,
         description: description.trim(),
-        longText: detailsHtml.trim(),
+        longText: htmlToPlainText(detailsHtml),
         logtype: selectedType.value,
         createby: createdBy.trim() || undefined,
         createdate: getCurrentDateTimeForApi(),
@@ -174,6 +324,49 @@ export default function AddWorkLogScreen({ route }: Props) {
             </View>
 
             <View style={styles.panelBody}>
+              <View style={styles.voiceSection}>
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  onPress={onVoicePress}
+                  style={[
+                    styles.voiceButton,
+                    recording && styles.voiceButtonRecording,
+                    voiceLoading && styles.voiceButtonDisabled,
+                  ]}
+                  disabled={voiceLoading}
+                >
+                  {voiceLoading ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <>
+                      <FeatherIcon name="mic" size={18} color="#fff" />
+                      <Text style={styles.voiceButtonText}>
+                        {recording ? 'Arrêter et analyser' : 'Dicter'}
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+
+                {voiceInfo ? (
+                  <View style={[styles.infoBox, voiceError && styles.errorBox]}>
+                    <FeatherIcon
+                      name={voiceError ? 'alert-circle' : 'check-circle'}
+                      size={16}
+                      color={voiceError ? '#dc2626' : '#16a34a'}
+                    />
+                    <Text style={[styles.infoText, voiceError && styles.errorText]}>
+                      {voiceInfo}
+                    </Text>
+                  </View>
+                ) : null}
+                {transcript ? (
+                  <View style={styles.transcriptBox}>
+                    <Text style={styles.fieldLabel}>Transcription :</Text>
+                    <Text style={styles.transcriptText}>{transcript}</Text>
+                  </View>
+                ) : null}
+              </View>
+
               <View style={styles.topGrid}>
                 <View style={styles.leftPanel}>
                   <View style={styles.fieldBlock}>
@@ -403,6 +596,62 @@ const styles = StyleSheet.create({
     padding: 12,
   },
 
+  voiceSection: {
+    marginBottom: 16,
+  },
+  voiceButton: {
+    backgroundColor: '#00319c',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  voiceButtonRecording: {
+    backgroundColor: '#dc2626',
+  },
+  voiceButtonDisabled: {
+    opacity: 0.7,
+  },
+  voiceButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+
+  infoBox: {
+    marginTop: 10,
+    backgroundColor: '#f0fdf4',
+    borderWidth: 1,
+    borderColor: '#86efac',
+    borderRadius: 10,
+    padding: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  infoText: {
+    flex: 1,
+    color: '#166534',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
+  transcriptBox: {
+    marginTop: 10,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#dbe2ea',
+    borderRadius: 10,
+    padding: 10,
+  },
+  transcriptText: {
+    color: '#334155',
+    fontSize: 13,
+    lineHeight: 20,
+  },
+
   topGrid: {
     flexDirection: 'row',
     gap: 18,
@@ -458,7 +707,14 @@ const styles = StyleSheet.create({
     borderBottomColor: '#d1d5db',
     paddingBottom: 4,
   },
+  errorBox: {
+  backgroundColor: '#fef2f2',
+  borderColor: '#fca5a5',
+},
 
+errorText: {
+  color: '#dc2626',
+},
   typePicker: {
     borderBottomWidth: 1,
     borderBottomColor: '#d1d5db',

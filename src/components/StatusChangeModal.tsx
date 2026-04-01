@@ -21,6 +21,7 @@ import {
   normalizeMaximoHref,
   DEFAULT_ACTIVITY_DOMAIN_ID,
   StatusFR,
+  getFrenchStatusLabel,
 } from '../services/statusService';
 
 type ActivityCtx = {
@@ -78,7 +79,6 @@ export default function StatusChangeModal({
   const [submitting, setSubmitting] = useState(false);
   const [list, setList] = useState<StatusFR[]>([]);
 
-  // Load status list when modal opens
   useEffect(() => {
     if (!visible || !username || !password) return;
 
@@ -99,6 +99,7 @@ export default function StatusChangeModal({
     (async () => {
       try {
         setLoadingList(true);
+
         const res =
           entityType === 'ACTIVITY'
             ? await getActivityStatusListFR(
@@ -108,7 +109,13 @@ export default function StatusChangeModal({
               )
             : await getWorkOrderStatusListFR(username, password);
 
-        if (!cancelled) setList(res);
+        if (!cancelled) {
+          const frenchList = res.map((item) => ({
+            ...item,
+            libelle: getFrenchStatusLabel(item.value || item.code, item.libelle),
+          }));
+          setList(frenchList);
+        }
       } catch (e: any) {
         if (!cancelled) {
           Alert.alert('Erreur', e?.message || 'Impossible de charger la liste des statuts');
@@ -118,21 +125,26 @@ export default function StatusChangeModal({
       }
     })();
 
-    return () => { cancelled = true; };
-  }, [visible, entityType, username, password, activityDomainId]);
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, entityType, username, password, activityDomainId, currentStatus, href, wonum, siteid, locked, activityCtx]);
 
   const currentLabel = useMemo(() => {
     const cur = upper(currentStatus);
     const found =
       list.find((x) => upper(x.code) === cur) ||
       list.find((x) => upper(x.value) === cur);
-    return found?.libelle || '';
+
+    return getFrenchStatusLabel(cur, found?.libelle || '');
   }, [list, currentStatus]);
 
   const options = useMemo(() => {
     const cur = upper(currentStatus);
+
     return list.map((s) => ({
       ...s,
+      libelle: getFrenchStatusLabel(s.value || s.code, s.libelle),
       isCurrent: upper(s.value) === cur || upper(s.code) === cur,
     }));
   }, [list, currentStatus]);
@@ -142,7 +154,8 @@ export default function StatusChangeModal({
     const found =
       list.find((x) => upper(x.value) === c) ||
       list.find((x) => upper(x.code) === c);
-    return found?.libelle || code;
+
+    return getFrenchStatusLabel(c, found?.libelle || code);
   }
 
   const handlePick = async (item: StatusFR) => {
@@ -151,7 +164,7 @@ export default function StatusChangeModal({
     if (locked || isFinalStatus(currentStatus)) {
       Alert.alert(
         'Statut verrouillé',
-        `Impossible de changer le statut (${upper(currentStatus)}).`
+        `Impossible de changer le statut (${getFrenchStatusLabel(currentStatus, currentStatus)}).`
       );
       return;
     }
@@ -166,9 +179,8 @@ export default function StatusChangeModal({
       let confirmedCode: string;
 
       if (entityType === 'ACTIVITY') {
-        // ── Activity: resolve localref then PATCH ──────────────────────────────
         if (!activityCtx?.taskid) {
-          throw new Error('taskid manquant pour le changement de statut d\'activité');
+          throw new Error("taskid manquant pour le changement de statut d'activité");
         }
 
         confirmedCode = await changeActivityStatus(
@@ -179,12 +191,9 @@ export default function StatusChangeModal({
           { memo: 'Changement via mobile' }
         );
       } else {
-        // ── Work Order: PATCH directly on WO href ──────────────────────────────
         const cleanHref = normalizeMaximoHref(href);
         if (!cleanHref) throw new Error('href WO manquant ou invalide');
 
-        // changeStatusByHref already confirms the new status internally via GET —
-        // no need to call fetchStatusByHref again after this
         confirmedCode = await changeStatusByHref(
           cleanHref,
           item.value,
@@ -194,7 +203,7 @@ export default function StatusChangeModal({
         );
       }
 
-      const newLabel = labelForCode(confirmedCode) || item.libelle || confirmedCode;
+      const newLabel = labelForCode(confirmedCode) || getFrenchStatusLabel(confirmedCode, item.libelle);
 
       onClose();
       onSuccess({ code: confirmedCode, label: newLabel });
@@ -207,32 +216,23 @@ export default function StatusChangeModal({
   };
 
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={onClose}
-    >
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.overlay}>
         <View style={styles.card}>
-          {/* Header */}
           <View style={styles.header}>
             <Text style={styles.title}>
               Changer le statut {entityType === 'ACTIVITY' ? "d'activité" : 'OT'}
             </Text>
+
             <TouchableOpacity onPress={onClose} style={styles.closeBtn} disabled={submitting}>
               <FeatherIcon name="x" size={18} color="#0f172a" />
             </TouchableOpacity>
           </View>
 
           <Text style={styles.subtitle}>
-            Statut actuel:{' '}
-            {currentLabel
-              ? `${currentLabel} (${upper(currentStatus)})`
-              : upper(currentStatus) || '-'}
+            Statut actuel : {currentLabel || getFrenchStatusLabel(currentStatus, currentStatus)}
           </Text>
 
-          {/* Status list */}
           {loadingList ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="small" color="#3b82f6" />
@@ -250,9 +250,7 @@ export default function StatusChangeModal({
                   activeOpacity={0.75}
                 >
                   <View style={{ flex: 1 }}>
-                    <Text
-                      style={[styles.rowTitle, item.isCurrent && styles.rowTitleActive]}
-                    >
+                    <Text style={[styles.rowTitle, item.isCurrent && styles.rowTitleActive]}>
                       {item.libelle}
                     </Text>
                   </View>
@@ -271,7 +269,6 @@ export default function StatusChangeModal({
 
           <View style={{ height: 12 }} />
 
-          {/* Submitting indicator */}
           {submitting && (
             <View style={styles.submittingRow}>
               <ActivityIndicator size="small" color="#3b82f6" />
@@ -279,7 +276,6 @@ export default function StatusChangeModal({
             </View>
           )}
 
-          {/* Close button */}
           <TouchableOpacity
             disabled={submitting}
             onPress={onClose}
@@ -330,7 +326,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  subtitle: { fontSize: 13, fontWeight: '600', color: '#64748b', marginBottom: 12 },
+  subtitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#64748b',
+    marginBottom: 12,
+  },
   loadingContainer: {
     paddingVertical: 24,
     alignItems: 'center',

@@ -79,6 +79,7 @@ export default function WorkOrdersScreen() {
         err?.response?.data || err?.message || err
       );
       const status = err?.response?.status;
+
       if (status === 401) {
         setError('Accès refusé (401). Vérifiez vos identifiants.');
         Alert.alert(
@@ -88,24 +89,16 @@ export default function WorkOrdersScreen() {
         await logout();
         return;
       }
+
       setError('Erreur lors du chargement des ordres de travail');
     } finally {
       setLoading(false);
     }
   }, [logout, setData]);
 
-  // ✅ initial load
-  useFocusEffect(
-    useCallback(() => {
-      fetchData(); // <-- your function that calls getWorkOrders()
-    }, [fetchData])
-  );
-
-  // ✅ REFRESH when coming back from details
   useFocusEffect(
     useCallback(() => {
       fetchData();
-      return () => {};
     }, [fetchData])
   );
 
@@ -119,6 +112,7 @@ export default function WorkOrdersScreen() {
 
   const getStatusBadge = (status: string) => {
     const upper = (status || '').toUpperCase();
+
     switch (upper) {
       case 'COMP':
       case 'CLOSE':
@@ -137,6 +131,7 @@ export default function WorkOrdersScreen() {
 
   const renderItem = ({ item }: { item: WorkOrder }) => {
     const status = getStatusBadge(item.status);
+
     return (
       <TouchableOpacity
         onPress={() => {
@@ -147,38 +142,39 @@ export default function WorkOrdersScreen() {
         activeOpacity={0.7}
       >
         <View style={[styles.statusStrip, { backgroundColor: status.color }]} />
+
         <View style={styles.cardContent}>
           <View style={styles.cardHeader}>
             <View style={styles.wonumBadge}>
               <Text style={styles.wonumText}>{item.wonum}</Text>
             </View>
-            <View style={styles.statusBadges}>
-              <View style={[styles.statusBadge, { backgroundColor: status.color }]}>
-                <Text style={styles.statusBadgeText}>{status.label}</Text>
-              </View>
+
+            <View style={[styles.statusBadge, { backgroundColor: status.color }]}>
+              <Text style={styles.statusBadgeText}>{status.label}</Text>
             </View>
           </View>
 
-          <Text style={styles.description} >
-            {item.description}
-          </Text>
+          <Text style={styles.description}>{item.description}</Text>
 
           <View style={styles.infoRow}>
             <View style={styles.infoBox}>
-              <Text style={styles.infoValue} >
+              <Text style={styles.infoValue}>
                 {item.asset?.trim() ? item.asset : 'Actif non renseigné'}
               </Text>
-              <Text style={styles.infoDescription} >
+              <Text style={styles.infoDescription}>
                 {item.assetDescription?.trim()
                   ? item.assetDescription
                   : 'Aucune description'}
               </Text>
             </View>
+
             <View style={styles.infoBox}>
-              <Text style={styles.infoValue} >
-                {item.location?.trim() ? item.location : 'Emplacement non renseigné'}
+              <Text style={styles.infoValue}>
+                {item.location?.trim()
+                  ? item.location
+                  : 'Emplacement non renseigné'}
               </Text>
-              <Text style={styles.infoDescription} >
+              <Text style={styles.infoDescription}>
                 {item.locationDescription?.trim()
                   ? item.locationDescription
                   : 'Aucune description'}
@@ -186,12 +182,12 @@ export default function WorkOrdersScreen() {
             </View>
           </View>
 
-          <View style={styles.infoRow}>
-            <View style={styles.infoBoxFull}>
-              <Text style={styles.infoValue} >
-                {item.scheduledStart ? formatDate(item.scheduledStart) : 'Non planifié'}
-              </Text>
-            </View>
+          <View style={styles.cardFooter}>
+            <Text style={styles.scheduledDateText}>
+              {item.scheduledStart
+                ? formatDate(item.scheduledStart)
+                : 'Non planifié'}
+            </Text>
           </View>
         </View>
       </TouchableOpacity>
@@ -219,10 +215,12 @@ export default function WorkOrdersScreen() {
       <SafeAreaView style={styles.container}>
         <View style={styles.errorContainer}>
           <View style={styles.errorIcon}>
-            <FeatherIcon name="alert-circle" size={48} color="#ef4444" />
+            <FeatherIcon name="alert-circle" size={44} color="#ef4444" />
           </View>
+
           <Text style={styles.errorTitle}>Oups !</Text>
           <Text style={styles.errorMessage}>{error}</Text>
+
           <TouchableOpacity style={styles.retryButton} onPress={fetchData}>
             <LinearGradient
               colors={['#3b82f6', '#1d4ed8']}
@@ -230,7 +228,7 @@ export default function WorkOrdersScreen() {
               end={{ x: 1, y: 0 }}
               style={styles.retryButtonGradient}
             >
-              <FeatherIcon name="refresh-cw" size={18} color="#fff" />
+              <FeatherIcon name="refresh-cw" size={16} color="#fff" />
               <Text style={styles.retryButtonText}>Réessayer</Text>
             </LinearGradient>
           </TouchableOpacity>
@@ -241,66 +239,51 @@ export default function WorkOrdersScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
       <LinearGradient
         colors={['#000000', '#1e3a8a']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.header}
       >
-        <View style={styles.headerTop}>
-          <View style={styles.headerLeft}>
-            <LinearGradient
-              colors={['#3b82f6', '#1d4ed8']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.logoGradient}
-            >
-              <Text style={styles.logoText}>S</Text>
-            </LinearGradient>
-            <View>
-              <Text style={styles.greeting}>Bonjour</Text>
-              <Text style={styles.userName}>Smartech Team</Text>
-            </View>
-          </View>
+        {/* Ligne 1: notif + deconnexion a droite */}
+        <View style={styles.headerTopRow}>
+          <View style={styles.headerSpacer} />
 
-          <View style={{ flexDirection: 'row', gap: 12 }}>
-            <TouchableOpacity style={styles.notificationButton}>
-              <FeatherIcon name="bell" size={22} color="#fff" />
+          <View style={styles.headerIconsRight}>
+            <TouchableOpacity style={styles.iconButton}>
+              <FeatherIcon name="bell" size={18} color="#fff" />
               <View style={styles.notificationDot} />
             </TouchableOpacity>
+
             <TouchableOpacity
-              style={styles.logoutButton}
+              style={styles.iconButton}
               onPress={() => setShowLogoutConfirm(true)}
             >
-              <FeatherIcon name="log-out" size={22} color="#fff" />
+              <FeatherIcon name="log-out" size={18} color="#fff" />
             </TouchableOpacity>
           </View>
         </View>
 
-        <TouchableOpacity onPress={() => setOpenDatePicker(true)} activeOpacity={0.8}>
-          <View style={styles.summaryCard}>
-            <View style={styles.summaryLeft}>
-              <Text style={styles.summaryCount}>{todayCount}</Text>
-              <Text style={styles.summaryLabel}>
-                {selectedDate ? formatDate(selectedDate.toISOString()) : 'Tâches du jour'}
-              </Text>
-            </View>
-            <View style={styles.summaryRight}>
-              <FeatherIcon name="calendar" size={18} color="#3b82f6" />
-              <Text style={styles.summaryDate}>
-                {selectedDate
-                  ? selectedDate.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })
-                  : new Date().toLocaleDateString('fr-FR', {
-                      day: 'numeric',
-                      month: 'short',
-                    })}
-              </Text>
-            </View>
+        {/* Ligne 2: nombre + calendrier sur toute la ligne */}
+        <TouchableOpacity
+          onPress={() => setOpenDatePicker(true)}
+          style={styles.tasksFullRow}
+          activeOpacity={0.8}
+        >
+          <View style={styles.tasksTextBlock}>
+            <Text style={styles.tasksCount}>{todayCount}</Text>
+            <Text style={styles.tasksSubLabel}>
+              {selectedDate
+                ? formatDate(selectedDate.toISOString())
+                : 'Tâches du jour'}
+            </Text>
+          </View>
+
+          <View style={styles.calendarButton}>
+            <FeatherIcon name="calendar" size={16} color="#3b82f6" />
           </View>
         </TouchableOpacity>
 
-        {/* Filters INSIDE header */}
         <View style={styles.headerFilters}>
           <ScrollView
             horizontal
@@ -329,7 +312,7 @@ export default function WorkOrdersScreen() {
               >
                 <FeatherIcon
                   name={filter.icon as any}
-                  size={16}
+                  size={14}
                   color={activeFilter === filter.key ? '#fff' : '#e2e8f0'}
                 />
                 <Text
@@ -346,10 +329,9 @@ export default function WorkOrdersScreen() {
         </View>
       </LinearGradient>
 
-      {/* Search + Scanner */}
       <View style={styles.actionBar}>
         <View style={styles.searchContainer}>
-          <FeatherIcon name="search" size={20} color="#94a3b8" />
+          <FeatherIcon name="search" size={18} color="#94a3b8" />
           <TextInput
             placeholder="Rechercher un ordre..."
             value={search}
@@ -358,8 +340,12 @@ export default function WorkOrdersScreen() {
             placeholderTextColor="#cbd5e1"
           />
         </View>
-        <TouchableOpacity onPress={() => setShowScanner(true)} style={styles.actionButton}>
-          <MaterialIcon name="qrcode-scan" size={22} color="#3b82f6" />
+
+        <TouchableOpacity
+          onPress={() => setShowScanner(true)}
+          style={styles.actionButton}
+        >
+          <MaterialIcon name="qrcode-scan" size={20} color="#3b82f6" />
         </TouchableOpacity>
       </View>
 
@@ -382,10 +368,12 @@ export default function WorkOrdersScreen() {
         {filteredData.length === 0 ? (
           <View style={styles.emptyState}>
             <View style={styles.emptyIcon}>
-              <FeatherIcon name="inbox" size={48} color="#cbd5e1" />
+              <FeatherIcon name="inbox" size={42} color="#cbd5e1" />
             </View>
             <Text style={styles.emptyTitle}>Aucun ordre trouvé</Text>
-            <Text style={styles.emptySubtitle}>Essayez de modifier vos filtres</Text>
+            <Text style={styles.emptySubtitle}>
+              Essayez de modifier vos filtres
+            </Text>
           </View>
         ) : (
           <FlatList
@@ -398,7 +386,6 @@ export default function WorkOrdersScreen() {
         )}
       </View>
 
-      {/* Logout Modal */}
       <Modal
         visible={showLogoutConfirm}
         transparent
@@ -408,14 +395,18 @@ export default function WorkOrdersScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <Text style={styles.modalTitle}>Confirmer la déconnexion</Text>
-            <Text style={styles.modalMessage}>Êtes-vous sûr de vouloir vous déconnecter ?</Text>
+            <Text style={styles.modalMessage}>
+              Êtes-vous sûr de vouloir vous déconnecter ?
+            </Text>
+
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={[styles.modalButton, { backgroundColor: '#e5e7eb' }]}
                 onPress={() => setShowLogoutConfirm(false)}
               >
-                <Text style={{ fontWeight: '600', color: '#1e293b' }}>Annuler</Text>
+                <Text style={styles.modalCancelText}>Annuler</Text>
               </TouchableOpacity>
+
               <TouchableOpacity
                 style={[styles.modalButton, { backgroundColor: '#3b82f6' }]}
                 onPress={async () => {
@@ -423,7 +414,7 @@ export default function WorkOrdersScreen() {
                   await logout();
                 }}
               >
-                <Text style={{ fontWeight: '600', color: '#fff' }}>Confirmer</Text>
+                <Text style={styles.modalConfirmText}>Confirmer</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -434,200 +425,448 @@ export default function WorkOrdersScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc' },
+  container: {
+    flex: 1,
+    backgroundColor: '#f8fafc',
+  },
 
-  // ✅ Smaller header
   header: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 12,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
+    paddingHorizontal: 14,
+    paddingTop: 6,
+    paddingBottom: 8,
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 16,
   },
-  headerTop: {
+
+  headerTopRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
+    justifyContent: 'space-between',
+    marginBottom: 8,
   },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
 
-  logoGradient: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  logoText: { fontSize: 20, fontWeight: '900', color: '#fff' },
+  headerSpacer: {
+    flex: 1,
+  },
 
-  greeting: { fontSize: 13, color: '#94a3b8', fontWeight: '500' },
-  userName: { fontSize: 15, fontWeight: '700', color: '#fff', marginTop: 1 },
+  headerIconsRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
 
-  notificationButton: {
-    width: 40,
-    height: 40,
+  iconButton: {
+    width: 32,
+    height: 32,
     backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 12,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
   },
+
   notificationDot: {
     position: 'absolute',
-    top: 9,
-    right: 9,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    top: 6,
+    right: 6,
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
     backgroundColor: '#ef4444',
-    borderWidth: 2,
+    borderWidth: 1.5,
     borderColor: '#1e3a8a',
   },
-  logoutButton: {
-    width: 40,
-    height: 40,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
 
-  summaryCard: {
+  tasksFullRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.98)',
-    borderRadius: 14,
-    padding: 12,
-    shadowColor: '#3b82f6',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    elevation: 4,
+    justifyContent: 'space-between',
+    width: '100%',
+    backgroundColor: 'rgba(255,255,255,0.12)',
     borderWidth: 1,
-    borderColor: 'rgba(59,130,246,0.1)',
+    borderColor: 'rgba(255,255,255,0.16)',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 8,
   },
-  summaryLeft: { flex: 1 },
-  summaryCount: { fontSize: 26, fontWeight: '900', color: '#0f172a', marginBottom: 1 },
-  summaryLabel: { fontSize: 12, color: '#64748b', fontWeight: '600' },
 
-  summaryRight: {
+  tasksTextBlock: {
+    flexShrink: 1,
+  },
+
+  tasksCount: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#fff',
+    lineHeight: 22,
+  },
+
+  tasksSubLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#cbd5e1',
+    marginTop: 2,
+  },
+
+  calendarButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    backgroundColor: '#fff',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 10,
+    marginLeft: 10,
   },
-  summaryDate: { fontSize: 11, fontWeight: '600', color: '#3b82f6', marginTop: 2 },
 
-  // ✅ Filters inside header
-  headerFilters: { marginTop: 10 },
-  filterScrollHeader: { paddingHorizontal: 0, gap: 8 },
+  headerFilters: {
+    marginTop: 0,
+  },
+
+  filterScrollHeader: {
+    paddingHorizontal: 0,
+    gap: 6,
+  },
 
   filterChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 18,
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 14,
     backgroundColor: 'rgba(255,255,255,0.12)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.18)',
-    marginRight: 8,
+    marginRight: 6,
   },
-  filterChipActive: { backgroundColor: '#3b82f6', borderColor: '#3b82f6' },
-  filterChipText: { fontSize: 13, fontWeight: '600', color: '#e2e8f0' },
-  filterChipTextActive: { color: '#fff' },
+
+  filterChipActive: {
+    backgroundColor: '#3b82f6',
+    borderColor: '#3b82f6',
+  },
+
+  filterChipText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#e2e8f0',
+  },
+
+  filterChipTextActive: {
+    color: '#fff',
+  },
 
   actionBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 20,
-    marginTop: 16,
-    marginBottom: 12,
+    gap: 8,
+    paddingHorizontal: 16,
+    marginTop: 10,
+    marginBottom: 8,
   },
+
   searchContainer: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
     backgroundColor: '#fff',
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    height: 50,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    height: 40,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  searchInput: { flex: 1, fontSize: 15, color: '#0f172a', fontWeight: '500' },
-  actionButton: {
-    width: 50,
-    height: 50,
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
     elevation: 2,
   },
 
-  content: { flex: 1, paddingHorizontal: 20 },
-  listContent: { paddingTop: 12, paddingBottom: 20 },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: '#0f172a',
+    fontWeight: '500',
+  },
+
+  actionButton: {
+    width: 40,
+    height: 40,
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+
+  content: {
+    flex: 1,
+    paddingHorizontal: 16,
+  },
+
+  listContent: {
+    paddingTop: 8,
+    paddingBottom: 16,
+  },
 
   card: {
     flexDirection: 'row',
     backgroundColor: '#fff',
-    borderRadius: 16,
-    marginBottom: 12,
+    borderRadius: 12,
+    marginBottom: 8,
     overflow: 'hidden',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+
+  statusStrip: {
+    width: 4,
+  },
+
+  cardContent: {
+    flex: 1,
+    padding: 12,
+  },
+
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 6,
+    gap: 8,
+  },
+
+  wonumBadge: {
+    backgroundColor: '#f1f5f9',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+
+  wonumText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#1e293b',
+  },
+
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 9,
+  },
+
+  statusBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#fff',
+  },
+
+  description: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#0f172a',
+    marginBottom: 8,
+    lineHeight: 18,
+  },
+
+  infoRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginBottom: 8,
+  },
+
+  infoBox: {
+    flex: 1,
+    backgroundColor: '#f8fafc',
+    borderRadius: 8,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+
+  infoValue: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#0f172a',
+    marginBottom: 2,
+  },
+
+  infoDescription: {
+    fontSize: 10,
+    fontWeight: '500',
+    color: '#64748b',
+    lineHeight: 13,
+  },
+
+  cardFooter: {
+    width: '100%',
+    alignItems: 'flex-end',
+  },
+
+  scheduledDateText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#64748b',
+    textAlign: 'right',
+  },
+
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  loadingText: {
+    marginTop: 14,
+    fontSize: 15,
+    color: '#93c5fd',
+    fontWeight: '600',
+  },
+
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 28,
+  },
+
+  errorIcon: {
+    width: 72,
+    height: 72,
+    backgroundColor: '#fee2e2',
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 18,
+  },
+
+  errorTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#0f172a',
+    marginBottom: 8,
+  },
+
+  errorMessage: {
+    fontSize: 14,
+    color: '#64748b',
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+
+  retryButton: {
+    borderRadius: 10,
+    overflow: 'hidden',
+    shadowColor: '#3b82f6',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
     elevation: 3,
   },
-  statusStrip: { width: 5 },
-  cardContent: { flex: 1, padding: 16 },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 },
-  wonumBadge: { backgroundColor: '#f1f5f9', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 },
-  wonumText: { fontSize: 12, fontWeight: '800', color: '#1e293b' },
-  statusBadges: { flexDirection: 'row', gap: 4 },
-  statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
-  statusBadgeText: { fontSize: 10, fontWeight: '700', color: '#fff' },
 
-  description: { fontSize: 15, fontWeight: '600', color: '#0f172a', marginBottom: 12, lineHeight: 22 },
+  retryButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
 
-  infoRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
-  infoBox: { flex: 1, backgroundColor: '#f8fafc', borderRadius: 10, padding: 8, borderWidth: 1, borderColor: '#e2e8f0' },
-  infoBoxFull: { flex: 1, backgroundColor: '#f8fafc', borderRadius: 10, padding: 8, borderWidth: 1, borderColor: '#e2e8f0' },
+  retryButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#fff',
+  },
 
-  infoLabel: { fontSize: 10, fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 4 },
-  infoValue: { fontSize: 12, fontWeight: '800', color: '#0f172a', marginBottom: 2 },
-  infoDescription: { fontSize: 10, fontWeight: '500', color: '#64748b', lineHeight: 13 },
+  emptyState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingTop: 60,
+  },
 
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  loadingText: { marginTop: 16, fontSize: 16, color: '#93c5fd', fontWeight: '600' },
+  emptyIcon: {
+    width: 88,
+    height: 88,
+    backgroundColor: '#f1f5f9',
+    borderRadius: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
 
-  errorContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
-  errorIcon: { width: 80, height: 80, backgroundColor: '#fee2e2', borderRadius: 40, alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
-  errorTitle: { fontSize: 24, fontWeight: '800', color: '#0f172a', marginBottom: 8 },
-  errorMessage: { fontSize: 15, color: '#64748b', textAlign: 'center', marginBottom: 24, lineHeight: 22 },
-  retryButton: { borderRadius: 12, overflow: 'hidden', shadowColor: '#3b82f6', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
-  retryButtonGradient: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 24, paddingVertical: 14 },
-  retryButtonText: { fontSize: 16, fontWeight: '700', color: '#fff' },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1e293b',
+    marginBottom: 6,
+  },
 
-  emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 80 },
-  emptyIcon: { width: 100, height: 100, backgroundColor: '#f1f5f9', borderRadius: 50, alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
-  emptyTitle: { fontSize: 20, fontWeight: '700', color: '#1e293b', marginBottom: 8 },
-  emptySubtitle: { fontSize: 14, color: '#94a3b8' },
+  emptySubtitle: {
+    fontSize: 13,
+    color: '#94a3b8',
+  },
 
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
-  modalContainer: { width: '80%', backgroundColor: '#fff', borderRadius: 16, padding: 24, alignItems: 'center' },
-  modalTitle: { fontSize: 18, fontWeight: '700', marginBottom: 12, color: '#0f172a' },
-  modalMessage: { fontSize: 14, color: '#64748b', textAlign: 'center', marginBottom: 24 },
-  modalButtons: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', gap: 12 },
-  modalButton: { flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  modalContainer: {
+    width: '80%',
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 22,
+    alignItems: 'center',
+  },
+
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    marginBottom: 10,
+    color: '#0f172a',
+  },
+
+  modalMessage: {
+    fontSize: 13,
+    color: '#64748b',
+    textAlign: 'center',
+    marginBottom: 22,
+  },
+
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+    gap: 10,
+  },
+
+  modalButton: {
+    flex: 1,
+    paddingVertical: 11,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+
+  modalCancelText: {
+    fontWeight: '600',
+    color: '#1e293b',
+  },
+
+  modalConfirmText: {
+    fontWeight: '600',
+    color: '#fff',
+  },
 });
