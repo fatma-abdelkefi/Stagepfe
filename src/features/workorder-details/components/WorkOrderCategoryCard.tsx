@@ -1,16 +1,23 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  Pressable,
+  Image,
+  ImageSourcePropType,
+} from 'react-native';
 import FeatherIcon from 'react-native-vector-icons/Feather';
-import LinearGradient from 'react-native-linear-gradient';
 
 type Props = {
   title: string;
-  icon: string;
-  gradient: readonly string[];
+  icon: ImageSourcePropType;
   count: number;
   width: number;
   height: number;
   showPlus?: boolean;
+  plusDisabled?: boolean;
   onPress: () => void;
   onPlusPress?: () => void;
 };
@@ -18,108 +25,126 @@ type Props = {
 export default function WorkOrderCategoryCard({
   title,
   icon,
-  gradient,
   count,
   width,
   height,
   showPlus = false,
+  plusDisabled = false,
   onPress,
   onPlusPress,
 }: Props) {
   return (
-    <View style={[styles.cardWrap, { width, height }]}>
-      <TouchableOpacity style={styles.cardTouch} activeOpacity={0.8} onPress={onPress}>
-        <LinearGradient
-          colors={gradient as any}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.gradient}
-        >
-          <View>
-            <View style={styles.iconContainer}>
-              <FeatherIcon name={icon as any} size={22} color="#fff" />
-            </View>
-            <Text style={styles.name} numberOfLines={2}>
-              {title}
-            </Text>
-          </View>
+    <TouchableOpacity
+      style={[styles.card, { width, height }]}
+      activeOpacity={0.85}
+      onPress={onPress}
+    >
+      <View style={styles.topRow}>
+        <View style={styles.iconContainer}>
+          <Image source={icon} style={styles.iconImage} resizeMode="contain" />
+        </View>
 
-          <View style={styles.count}>
-            <Text style={styles.countText}>{count}</Text>
-          </View>
-        </LinearGradient>
-      </TouchableOpacity>
+        {showPlus && !!onPlusPress && (
+          <Pressable
+            disabled={plusDisabled}
+            onPress={e => {
+              e.stopPropagation();
+              onPlusPress();
+            }}
+            style={[
+              styles.plusButton,
+              plusDisabled && styles.plusButtonDisabled,
+            ]}
+          >
+            <FeatherIcon
+              name="plus"
+              size={15}
+              color={plusDisabled ? '#566079' : '#8f9ab8'}
+            />
+          </Pressable>
+        )}
+      </View>
 
-      {showPlus && !!onPlusPress && (
-        <TouchableOpacity onPress={onPlusPress} style={styles.plusButton} activeOpacity={0.9}>
-          <FeatherIcon name="plus" size={16} color="#fff" />
-        </TouchableOpacity>
-      )}
-    </View>
+      <View>
+        <Text style={styles.countText}>{count}</Text>
+
+        <Text style={styles.name} numberOfLines={1}>
+          {title}
+        </Text>
+      </View>
+
+      <View style={styles.decorCircle} />
+    </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
-  cardWrap: {
+  card: {
+    backgroundColor: '#111522',
     borderRadius: 18,
-    overflow: 'visible',
-    position: 'relative',
-  },
-  cardTouch: {
-    flex: 1,
-    borderRadius: 18,
-    overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
-  gradient: {
-    flex: 1,
+    borderColor: '#202639',
     padding: 14,
     justifyContent: 'space-between',
+    overflow: 'hidden',
+
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 4,
+  },
+  topRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  iconContainer: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: '#1a2033',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconImage: {
+    width: 22,
+    height: 22,
   },
   plusButton: {
-    position: 'absolute',
-    bottom: 10,
-    right: 10,
     width: 28,
     height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.3)',
+    borderRadius: 9,
+    backgroundColor: '#1a2033',
+    borderWidth: 1,
+    borderColor: '#27304a',
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 20,
     elevation: 6,
   },
-  iconContainer: {
-    width: 36,
-    height: 36,
-    borderRadius: 11,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  name: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#fff',
-    marginTop: 8,
-    paddingRight: 22,
-    lineHeight: 15,
-  },
-  count: {
-    position: 'absolute',
-    top: 10,
-    right: 10,
-    backgroundColor: 'rgba(255,255,255,0.25)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 9,
-    minWidth: 26,
-    alignItems: 'center',
+  plusButtonDisabled: {
+    opacity: 0.45,
   },
   countText: {
-    fontSize: 11,
+    fontSize: 28,
+    color: '#ffffff',
     fontWeight: '800',
-    color: '#fff',
+    lineHeight: 32,
+    marginBottom: 2,
+  },
+  name: {
+    fontSize: 12,
+    color: '#405081',
+    fontWeight: '700',
+  },
+  decorCircle: {
+    position: 'absolute',
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    right: -28,
+    bottom: -26,
+    backgroundColor: 'rgba(109, 92, 255, 0.14)',
   },
 });

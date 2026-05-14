@@ -63,6 +63,7 @@ export type AddActualMaterialPayload = {
 export type WorkOrderDetailsSummary = {
   wonum: string;
   href?: string;
+  assetnum?: string;
   description: string;
   status: string;
   siteid?: string;
@@ -72,7 +73,7 @@ export type WorkOrderDetailsSummary = {
   asset: string;
   assetDescription: string;
 
-  location: string;
+  location?: string;
   locationDescription: string;
 
   scheduledStart: string | null;

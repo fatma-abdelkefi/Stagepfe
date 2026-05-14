@@ -310,8 +310,12 @@
             wonum: String(summary.wonum ?? ''),
             siteid: String(summary.siteid ?? ''),
             description: String(summary.description ?? ''),
-            assetnum: String((summary as any).assetnum ?? summary.asset ?? ''),
-            location: String(summary.location ?? ''),
+            assetnum: summary.assetnum
+              ? String(summary.assetnum)
+              : '',
+            location: summary.location
+              ? String(summary.location)
+              : '',
           });
           return;
         }
