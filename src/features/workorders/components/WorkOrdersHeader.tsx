@@ -11,6 +11,7 @@ type Props = {
   formatDate: (date: string) => string;
   onOpenCalendar: () => void;
   onLogout: () => void;
+  onAIAuth: () => void;
 };
 
 export default function WorkOrdersHeader({
@@ -19,6 +20,7 @@ export default function WorkOrdersHeader({
   formatDate,
   onOpenCalendar,
   onLogout,
+  onAIAuth,
 }: Props) {
   return (
     <LinearGradient
@@ -41,6 +43,15 @@ export default function WorkOrdersHeader({
           <TouchableOpacity style={styles.iconButton} activeOpacity={0.8}>
             <FeatherIcon name="bell" size={18} color="#fff" />
             <View style={styles.notificationDot} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.iconButton, styles.aiButton]}
+            onPress={onAIAuth}
+            activeOpacity={0.8}
+          >
+            <FeatherIcon name="cpu" size={18} color="#fff" />
+            <View style={styles.aiDot} />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -123,6 +134,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     position: 'relative',
   },
+  aiButton: {
+    backgroundColor: 'rgba(34,197,94,0.16)',
+    borderColor: 'rgba(34,197,94,0.35)',
+  },
   notificationDot: {
     position: 'absolute',
     top: 7,
@@ -131,6 +146,17 @@ const styles = StyleSheet.create({
     height: 7,
     borderRadius: 4,
     backgroundColor: '#ef4444',
+    borderWidth: 1.5,
+    borderColor: '#0f1e35',
+  },
+  aiDot: {
+    position: 'absolute',
+    top: 7,
+    right: 7,
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: '#22c55e',
     borderWidth: 1.5,
     borderColor: '#0f1e35',
   },

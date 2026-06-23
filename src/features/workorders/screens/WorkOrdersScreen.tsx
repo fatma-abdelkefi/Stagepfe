@@ -1,16 +1,25 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   FlatList,
   StyleSheet,
   Modal,
   ActivityIndicator,
+  TouchableOpacity,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import FeatherIcon from 'react-native-vector-icons/Feather';
 import LinearGradient from 'react-native-linear-gradient';
+import SuccessModal from '../../../shared/components/feedback/SuccessModal';
+import ErrorModal from '../../../shared/components/feedback/ErrorModal';
+import { checkAIAuthentication } from '../services/aiAuthService';
 
-import { useNavigation, useRoute } from '@react-navigation/native';
+import {
+  useNavigation,
+  useRoute,
+  useFocusEffect,
+} from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../../app/navigation/types';
 
@@ -31,6 +40,45 @@ import AppText from '../../../shared/components/typography/AppText';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'WorkOrders'>;
 
+function normalizeWorkOrderForNavigation(item: any) {
+  const scheduledStart =
+    item?.scheduledStart ||
+    item?.scheduled_start ||
+    item?.schedstart ||
+    item?.scheduledstart ||
+    item?.targetStart ||
+    item?.target_start ||
+    item?.targetstart ||
+    item?.targstartdate ||
+    null;
+
+  const scheduledFinish =
+    item?.scheduledFinish ||
+    item?.scheduled_finish ||
+    item?.schedfinish ||
+    item?.scheduledfinish ||
+    item?.targetFinish ||
+    item?.target_finish ||
+    item?.targetfinish ||
+    item?.targcompdate ||
+    null;
+
+  return {
+    ...item,
+
+    wonum: String(item?.wonum || ''),
+    siteid: String(item?.siteid || item?.site || 'BEDFORD'),
+
+    scheduledStart,
+    scheduledFinish,
+
+    scheduled_start: scheduledStart,
+    scheduled_finish: scheduledFinish,
+
+    schedstart: item?.schedstart || scheduledStart,
+    schedfinish: item?.schedfinish || scheduledFinish,
+  };
+}
 export default function WorkOrdersScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<any>();
@@ -55,20 +103,44 @@ export default function WorkOrdersScreen() {
   const [openDatePicker, setOpenDatePicker] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [showAISuccessModal, setShowAISuccessModal] = useState(false);
+const [showAIErrorModal, setShowAIErrorModal] = useState(false);
+const [aiModalMessage, setAIModalMessage] = useState('');
 
   const showAtStart = !!route.params?.showPermissionsModal;
-
   const permissionsVM = useWorkOrdersPermissionsViewModel(showAtStart);
 
-  const handleScan = (barcode: string) => {
-    setShowScanner(false);
-    setBarcodeFilter(barcode);
-    setActiveFilter('Tous');
-    setSearch('');
-    setSelectedDate(null);
-  };
 
-  const handleOpenScanner = async () => {
+  const handleAIAuth = useCallback(async () => {
+  const result = await checkAIAuthentication();
+
+  if (result.success) {
+    setAIModalMessage(
+      result.message ||
+        'Le service IA est disponible. Vous pouvez utiliser les fonctionnalités intelligentes.',
+    );
+    setShowAISuccessModal(true);
+    return;
+  }
+
+  setAIModalMessage(
+    result.message || "Impossible de contacter le service IA.",
+  );
+  setShowAIErrorModal(true);
+}, []);
+
+  const handleScan = useCallback(
+    (barcode: string) => {
+      setShowScanner(false);
+      setBarcodeFilter(barcode);
+      setActiveFilter('Tous');
+      setSearch('');
+      setSelectedDate(null);
+    },
+    [setActiveFilter, setBarcodeFilter, setSearch, setSelectedDate],
+  );
+
+  const handleOpenScanner = useCallback(async () => {
     const granted = await permissionsVM.ensureCameraPermission();
 
     if (!granted) {
@@ -76,7 +148,32 @@ export default function WorkOrdersScreen() {
     }
 
     setShowScanner(true);
-  };
+  }, [permissionsVM]);
+
+  const handleOpenDetails = useCallback(
+    (item: any) => {
+      const workOrder = normalizeWorkOrderForNavigation(item);
+
+      if (!workOrder.wonum) {
+        return;
+      }
+
+      navigation.navigate('WorkOrderDetails', {
+        wonum: workOrder.wonum,
+        siteid: workOrder.siteid,
+        workOrder,
+      });
+    },
+    [navigation],
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      refetch();
+
+      return undefined;
+    }, [refetch]),
+  );
 
   if (loading) {
     return (
@@ -111,7 +208,11 @@ export default function WorkOrdersScreen() {
           <AppText style={styles.errorTitle}>Oups !</AppText>
           <AppText style={styles.errorMessage}>{error}</AppText>
 
-          <View style={styles.retryButtonWrap}>
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={refetch}
+            style={styles.retryButtonWrap}
+          >
             <LinearGradient
               colors={['#3b82f6', '#2563eb']}
               start={{ x: 0, y: 0 }}
@@ -119,11 +220,9 @@ export default function WorkOrdersScreen() {
               style={styles.retryGradient}
             >
               <FeatherIcon name="refresh-cw" size={15} color="#fff" />
-              <AppText onPress={refetch} style={styles.retryText}>
-                Réessayer
-              </AppText>
+              <AppText style={styles.retryText}>Réessayer</AppText>
             </LinearGradient>
-          </View>
+          </TouchableOpacity>
         </View>
 
         <AppPermissionsModal
@@ -146,6 +245,7 @@ export default function WorkOrdersScreen() {
         formatDate={formatDate}
         onOpenCalendar={() => setOpenDatePicker(true)}
         onLogout={() => setShowLogoutConfirm(true)}
+        onAIAuth={handleAIAuth}
       />
 
       <WorkOrdersFilters
@@ -157,7 +257,11 @@ export default function WorkOrdersScreen() {
         onOpenScanner={handleOpenScanner}
         onResetCalendarFilter={() => setSelectedDate(null)}
         onResetBarcodeFilter={() => setBarcodeFilter(null)}
-        onClearSearchSideEffects={() => {}}
+        onClearSearchSideEffects={() => {
+          setBarcodeFilter(null);
+          setSelectedDate(null);
+          setActiveFilter('Tous');
+        }}
       />
 
       <CustomCalendar
@@ -193,16 +297,14 @@ export default function WorkOrdersScreen() {
         ) : (
           <FlatList
             data={filteredData}
-            keyExtractor={item => item.wonum}
+            keyExtractor={(item, index) =>
+              String(item?.wonum || item?.workorderid || index)
+            }
             renderItem={({ item }) => (
               <WorkOrderCard
                 item={item}
                 formatDate={formatDate}
-                onPress={() =>
-                  navigation.navigate('WorkOrderDetails', {
-                    workOrder: item,
-                  })
-                }
+                onPress={() => handleOpenDetails(item)}
               />
             )}
             showsVerticalScrollIndicator={false}
@@ -210,6 +312,21 @@ export default function WorkOrdersScreen() {
           />
         )}
       </View>
+
+      <TouchableOpacity
+        activeOpacity={0.85}
+        style={styles.addButton}
+        onPress={() => navigation.navigate('AddWorkOrder')}
+      >
+        <LinearGradient
+          colors={['#3b82f6', '#2563eb']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.addButtonGradient}
+        >
+          <FeatherIcon name="plus" size={28} color="#fff" />
+        </LinearGradient>
+      </TouchableOpacity>
 
       <LogoutConfirmModal
         visible={showLogoutConfirm}
@@ -227,6 +344,19 @@ export default function WorkOrdersScreen() {
         blockedMicrophone={permissionsVM.blockedMicrophone}
         onConfirm={permissionsVM.confirmSelection}
         onLater={permissionsVM.closeModal}
+      />
+      <SuccessModal
+        visible={showAISuccessModal}
+        title="IA connectée"
+        message={aiModalMessage}
+        onClose={() => setShowAISuccessModal(false)}
+      />
+
+      <ErrorModal
+        visible={showAIErrorModal}
+        title="IA indisponible"
+        message={aiModalMessage}
+        onClose={() => setShowAIErrorModal(false)}
       />
     </SafeAreaView>
   );
@@ -329,4 +459,28 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#475569',
   },
+  addButton: {
+    position: 'absolute',
+    right: 20,
+    bottom: 28,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    overflow: 'hidden',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+  },
+
+  addButtonGradient: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  
 });

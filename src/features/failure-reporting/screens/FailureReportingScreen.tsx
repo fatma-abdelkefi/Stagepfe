@@ -1,13 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { RouteProp } from '@react-navigation/native';
 import { useNavigation } from '@react-navigation/native';
 
 import type { RootStackParamList } from '../../../app/navigation/types';
 import AddEntityScreenLayout from '../../../shared/components/forms/AddEntityScreenLayout';
-import FailureHeaderCard from '../components/FailureHeaderCard';
 import FailurePredictionCard from '../components/FailurePredictionCard';
 import { predictFailureWithAI } from '../services/aiFailurePredictionService';
-import { saveLocalFailureReport } from '../services/localFailureReportService';
 import type { PredictedFailureDetails } from '../types/failureReporting.types';
 import {
   buildPredictedFailureDetails,
@@ -15,84 +13,135 @@ import {
   safeTrim,
 } from '../utils/failureFormatters';
 
+import { useAuth } from '../../../app/providers/AuthProvider';
+import { saveFailureReportToMaximo } from '../services/failureReportingMaximoService';
+import { addValidatedFailureExample } from '../services/validatedFailureExampleService';
+import { validateFailureHierarchy } from '../services/failureHierarchyValidationService';
+
 type Props = {
   route: RouteProp<RootStackParamList, 'FailureReporting'>;
 };
 
+function getParamValue(params: any, keys: string[]): string {
+  for (const key of keys) {
+    const value = safeTrim(params?.[key]);
+    if (value) return value;
+  }
+
+  return '';
+}
+
+function mapTextArray(
+  items: any[] | undefined,
+  mapper: (item: any) => string,
+): string[] {
+  if (!Array.isArray(items)) return [];
+
+  return items
+    .map(mapper)
+    .map(value => safeTrim(value))
+    .filter(Boolean);
+}
+
+function buildLearningText(params: any, predicted: PredictedFailureDetails): string {
+  const problem = predicted.codes.find(x => x.type === 'PROBLEM');
+  const cause = predicted.codes.find(x => x.type === 'CAUSE');
+  const remedy = predicted.codes.find(x => x.type === 'REMEDY');
+
+  return [
+    safeTrim(params?.description),
+    safeTrim(params?.description_longdescription),
+    safeTrim(params?.longDescription),
+    safeTrim(params?.longdescription),
+    predicted.remarks,
+    predicted.failureClass,
+    problem?.code,
+    cause?.code,
+    remedy?.code,
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
 export default function FailureReportingScreen({ route }: Props) {
   const navigation = useNavigation<any>();
   const params = route.params;
+  const { username, password } = useAuth();
 
   const creationDate = useMemo(() => getFailureReportCreationDate(), []);
+
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [predicted, setPredicted] = useState<PredictedFailureDetails | null>(null);
   const [hasLaunched, setHasLaunched] = useState(false);
   const [successVisible, setSuccessVisible] = useState(false);
+  const [userEdited, setUserEdited] = useState(false);
 
   const wonum = safeTrim(params?.wonum);
-  const siteid = safeTrim(params?.siteid);
+  const siteid = safeTrim(params?.siteid) || 'BEDFORD';
 
-  const buildAiPayloadFromWO = () => {
+  const buildAiPayloadFromWO = useCallback(() => {
     const description = safeTrim(params?.description);
 
-    const longDescription =
-      safeTrim((params as any)?.description_longdescription) ||
-      safeTrim((params as any)?.longDescription) ||
-      safeTrim((params as any)?.longdescription);
-
-    const mapLog = (w: any) =>
-      safeTrim(
-        w?.description ||
-          w?.description_longdescription ||
-          w?.longdescription ||
-          w?.logtext,
-      );
+    const longDescription = getParamValue(params, [
+      'description_longdescription',
+      'longDescription',
+      'longdescription',
+    ]);
 
     const worklog = Array.isArray((params as any)?.workLogs)
-      ? (params as any).workLogs.map(mapLog).filter(Boolean)
+      ? mapTextArray((params as any).workLogs, (w: any) =>
+          [
+            w?.description,
+            w?.description_longdescription,
+            w?.longdescription,
+            w?.logtext,
+          ]
+            .filter(Boolean)
+            .join(' '),
+        )
       : Array.isArray((params as any)?.worklog)
-      ? (params as any).worklog.map(mapLog).filter(Boolean)
+      ? mapTextArray((params as any).worklog, (w: any) =>
+          [
+            w?.description,
+            w?.description_longdescription,
+            w?.longdescription,
+            w?.logtext,
+          ]
+            .filter(Boolean)
+            .join(' '),
+        )
       : [];
 
     const activities = Array.isArray((params as any)?.activities)
-      ? (params as any).activities
-          .map((a: any) => safeTrim(a?.description || a?.taskid || a?.wonum))
-          .filter(Boolean)
+      ? mapTextArray((params as any).activities, (a: any) =>
+          [a?.description, a?.taskid, a?.wonum].filter(Boolean).join(' '),
+        )
       : Array.isArray((params as any)?.woactivity)
-      ? (params as any).woactivity
-          .map((a: any) => safeTrim(a?.description || a?.taskid || a?.wonum))
-          .filter(Boolean)
+      ? mapTextArray((params as any).woactivity, (a: any) =>
+          [a?.description, a?.taskid, a?.wonum].filter(Boolean).join(' '),
+        )
       : [];
 
     const actualMaterials = Array.isArray((params as any)?.actualMaterials)
-      ? (params as any).actualMaterials
-          .map((m: any) =>
-            [
-              safeTrim(m?.itemnum),
-              safeTrim(m?.description || m?.itemdesc),
-              safeTrim(m?.quantity ?? m?.itemqty ?? m?.qty),
-            ]
-              .filter(Boolean)
-              .join(' '),
-          )
-          .filter(Boolean)
+      ? mapTextArray((params as any).actualMaterials, (m: any) =>
+          [
+            m?.itemnum,
+            m?.description || m?.itemdesc,
+            m?.quantity ?? m?.itemqty ?? m?.qty,
+          ]
+            .filter(Boolean)
+            .join(' '),
+        )
       : [];
 
     const actualLabor = Array.isArray((params as any)?.actualLabor)
-      ? (params as any).actualLabor
-          .map((l: any) =>
-            [
-              safeTrim(l?.laborcode),
-              safeTrim(l?.craft),
-              safeTrim(l?.skilllevel),
-              safeTrim(l?.regularhrs),
-            ]
-              .filter(Boolean)
-              .join(' '),
-          )
-          .filter(Boolean)
+      ? mapTextArray((params as any).actualLabor, (l: any) =>
+          [l?.laborcode, l?.craft, l?.skilllevel, l?.regularhrs]
+            .filter(Boolean)
+            .join(' '),
+        )
       : [];
 
     const assetText = [
@@ -118,69 +167,234 @@ export default function FailureReportingScreen({ route }: Props) {
       lang: 'fr' as const,
       debug: false,
     };
-  };
+  }, [params]);
 
-  const handleGenerate = async () => {
+  const handleGenerate = useCallback(async () => {
     try {
       setLoading(true);
       setAiError(null);
       setPredicted(null);
+      setUserEdited(false);
 
       const payload = buildAiPayloadFromWO();
-      const data = await predictFailureWithAI(payload);
 
-      setPredicted(buildPredictedFailureDetails(data, creationDate));
+      const hasUsefulText =
+        safeTrim(payload.description) ||
+        safeTrim(payload.long_description) ||
+        safeTrim(payload.assetnum) ||
+        safeTrim(payload.location) ||
+        payload.worklog.length > 0 ||
+        payload.activities.length > 0 ||
+        payload.actual_materials.length > 0 ||
+        payload.actual_labor.length > 0;
 
-      if (!data.failure_class && !data.problem && !data.cause && !data.remedy) {
-        setAiError("L'IA n'a retourné aucune classification exploitable.");
+      if (!hasUsefulText) {
+        setAiError(
+          'Veuillez ajouter au moins une description ou des informations sur le Work Order.',
+        );
+        return;
       }
+
+      const data = await predictFailureWithAI(payload);
+      const nextPredicted = buildPredictedFailureDetails(data, creationDate);
+
+      setPredicted(nextPredicted);
     } catch (e: any) {
       setAiError(e?.message || 'Erreur lors de la génération du failure reporting.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [buildAiPayloadFromWO, creationDate]);
 
-  const handleSave = async () => {
-    if (!predicted) {
-      setAiError('Aucun signalement à enregistrer.');
+  const handleChangePredicted = useCallback((next: PredictedFailureDetails) => {
+    setPredicted({
+      ...next,
+      lowConfidence: false,
+      validationRequired: false,
+      recommendationMessage: 'Codes vérifiés ou corrigés par le technicien.',
+    });
+
+    setUserEdited(true);
+    setAiError(null);
+  }, []);
+
+  const handleSave = useCallback(async () => {
+  if (!predicted) {
+    setAiError('Aucun signalement à enregistrer.');
+    return;
+  }
+
+  if (!wonum || !siteid) {
+    setAiError('WO ou site manquant.');
+    return;
+  }
+
+  const problem = predicted.codes.find(x => x.type === 'PROBLEM');
+  const cause = predicted.codes.find(x => x.type === 'CAUSE');
+  const remedy = predicted.codes.find(x => x.type === 'REMEDY');
+
+  const failureClass = safeTrim(predicted.failureClass);
+
+  const problemCode = safeTrim(problem?.code);
+  const causeCode = safeTrim(cause?.code);
+  const remedyCode = safeTrim(remedy?.code);
+
+  const problemDescription = safeTrim(problem?.description);
+  const causeDescription = safeTrim(cause?.description);
+  const remedyDescription = safeTrim(remedy?.description);
+
+  const remark = safeTrim(predicted.remarks);
+
+  console.log('🔥 FAILURE SELECTED CODES =', {
+    failureClass,
+    problemCode,
+    causeCode,
+    remedyCode,
+    remark,
+    allCodes: predicted.codes,
+  });
+
+  if (!failureClass || !problemCode || !causeCode || !remedyCode) {
+    setAiError(
+      [
+        'Failure Reporting incomplet.',
+        '',
+        `Classe : ${failureClass || '—'}`,
+        `Problème : ${problemCode || '—'}`,
+        `Cause : ${causeCode || '—'}`,
+        `Remède : ${remedyCode || '—'}`,
+        '',
+        'La classe de panne, le problème, la cause et le remède sont obligatoires.',
+      ].join('\n'),
+    );
+    return;
+  }
+
+  const status = safeTrim((params as any)?.status).toUpperCase();
+
+  if (status === 'CLOSE' || status === 'CLOSED' || status === 'COMP') {
+    setAiError(
+      "Impossible d'enregistrer le Failure Reporting : l'ordre de travail est déjà fermé.",
+    );
+    return;
+  }
+
+  try {
+    setSaving(true);
+    setAiError(null);
+
+    const validation = await validateFailureHierarchy({
+      failure_class: failureClass,
+      problem: problemCode,
+      cause: causeCode,
+      remedy: remedyCode,
+    });
+
+    if (validation.is_valid === false) {
+      const warnings = validation.warnings?.length
+        ? validation.warnings.join('\n')
+        : 'Combinaison failure_class/problem/cause/remedy non validée.';
+
+      setAiError(
+        [
+          'Hiérarchie Failure Reporting invalide.',
+          warnings,
+          'Veuillez choisir une combinaison valide avant enregistrement Maximo.',
+        ].join('\n'),
+      );
       return;
     }
 
+    const report = {
+      failureClass,
+      failureClassDescription: safeTrim(predicted.failureClassDescription),
+
+      failureDate: predicted.failureDate,
+      remarkDate: predicted.remarkDate,
+      remark,
+
+      problem: problemCode,
+      problemCode,
+      problemDescription,
+
+      cause: causeCode,
+      causeCode,
+      causeDescription,
+
+      remedy: remedyCode,
+      remedyCode,
+      remedyDescription,
+
+      codes: predicted.codes,
+    };
+
+    console.log('🔥 FAILURE REPORT TO SAVE =', JSON.stringify(report, null, 2));
+    console.log('FAILURE PARAMS =', params);
+    console.log('FAILURE HREF =', (params as any)?.href);
+    console.log('FAILURE WOHREF =', (params as any)?.woHref);
+
+    await saveFailureReportToMaximo({
+      username: String(username || ''),
+      password: String(password || ''),
+      wonum,
+      siteid,
+      woHref: safeTrim((params as any)?.woHref) || safeTrim((params as any)?.href),
+      report,
+    });
+
     try {
-      setSaving(true);
+      const learningText = buildLearningText(params, predicted);
 
-      await saveLocalFailureReport(wonum, siteid, {
-        failureClass: predicted.failureClass,
-        failureClassDescription: predicted.failureClassDescription,
-        failureDate: predicted.failureDate,
-        remarkDate: predicted.remarkDate,
-        remark: predicted.remarks,
-        problem: predicted.codes.find(x => x.type === 'PROBLEM')?.code || '',
-        problemDescription:
-          predicted.codes.find(x => x.type === 'PROBLEM')?.description || '',
-        cause: predicted.codes.find(x => x.type === 'CAUSE')?.code || '',
-        causeDescription:
-          predicted.codes.find(x => x.type === 'CAUSE')?.description || '',
-        remedy: predicted.codes.find(x => x.type === 'REMEDY')?.code || '',
-        remedyDescription:
-          predicted.codes.find(x => x.type === 'REMEDY')?.description || '',
-        codes: predicted.codes,
+      await addValidatedFailureExample({
+        text: learningText || remark || safeTrim(params?.description),
+
+        failure_class: failureClass,
+        problem: problemCode,
+        cause: causeCode,
+        remedy: remedyCode,
+
+        wonum,
+        siteid,
+
+        description: safeTrim(params?.description),
+        details:
+          safeTrim((params as any)?.description_longdescription) ||
+          safeTrim((params as any)?.longDescription) ||
+          safeTrim((params as any)?.longdescription),
+
+        assetnum: safeTrim(params?.assetnum),
+        asset_description: safeTrim(params?.assetDescription),
+        location: safeTrim(params?.location) || safeTrim(params?.locationDescription),
+
+        source: 'mobile_confirmed_failure',
+        metadata: {
+          origin: 'mobile_app',
+          module: 'failure_reporting',
+          saved_to_maximo: true,
+          user_edited: userEdited,
+          confidence_before_user_validation: predicted.confidence,
+          validation_tool: 'validate_failure_hierarchy',
+          validation_result: validation,
+        },
       });
-
-      setSuccessVisible(true);
-    } catch (e: any) {
-      setAiError(e?.message || "Impossible d'enregistrer le failure reporting.");
-    } finally {
-      setSaving(false);
+    } catch (learningError) {
+      console.log('Failure learning save skipped/error =', learningError);
     }
-  };
+
+    setSuccessVisible(true);
+  } catch (e: any) {
+    setAiError(e?.message || "Impossible d'enregistrer le failure reporting.");
+  } finally {
+    setSaving(false);
+  }
+}, [predicted, userEdited, wonum, siteid, params, username, password]);
 
   useEffect(() => {
     if (hasLaunched || !params) return;
+
     setHasLaunched(true);
     handleGenerate();
-  }, [hasLaunched, params]);
+  }, [hasLaunched, params, handleGenerate]);
 
   return (
     <AddEntityScreenLayout
@@ -191,7 +405,7 @@ export default function FailureReportingScreen({ route }: Props) {
       submitIcon="save"
       onSubmit={handleSave}
       submitLoading={saving}
-      submitDisabled={saving || !predicted}
+      submitDisabled={saving || loading || !predicted}
       onCancel={() => navigation.goBack()}
       successVisible={successVisible}
       successTitle="Failure reporting enregistré"
@@ -205,23 +419,14 @@ export default function FailureReportingScreen({ route }: Props) {
       errorMessage={aiError || ''}
       onCloseError={() => setAiError(null)}
     >
-      <FailureHeaderCard
-        wonum={params?.wonum}
-        description={params?.description}
-        status={params?.status}
-        assetnum={params?.assetnum}
-        assetDescription={params?.assetDescription}
-        location={params?.location}
-        locationDescription={params?.locationDescription}
-      />
-
       <FailurePredictionCard
         loading={loading}
         saving={saving}
-        error={aiError}
+        error={null}
         predicted={predicted}
-        onGenerate={handleGenerate}
-        onSave={handleSave}
+        siteid={siteid}
+        editable
+        onChangePredicted={handleChangePredicted}
       />
     </AddEntityScreenLayout>
   );

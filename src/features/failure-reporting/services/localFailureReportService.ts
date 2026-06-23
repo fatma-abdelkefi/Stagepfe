@@ -4,24 +4,22 @@ import type {
   WorkOrderFailureReport,
 } from '../types/failureReporting.types';
 
-const PREFIX = 'failure_report_local_v1';
-
 function buildKey(wonum: string, siteid: string) {
-  return `${PREFIX}:${String(wonum).trim()}:${String(siteid).trim()}`;
+  return `failure-report:${siteid}:${wonum}`;
 }
 
 export async function saveLocalFailureReport(
   wonum: string,
   siteid: string,
   report: WorkOrderFailureReport,
-): Promise<void> {
-  const payload: SavedFailureReport = {
+) {
+  const data: SavedFailureReport = {
     ...report,
-    wonum: String(wonum).trim(),
-    siteid: String(siteid).trim(),
+    wonum,
+    siteid,
   };
 
-  await AsyncStorage.setItem(buildKey(wonum, siteid), JSON.stringify(payload));
+  await AsyncStorage.setItem(buildKey(wonum, siteid), JSON.stringify(data));
 }
 
 export async function getLocalFailureReport(
@@ -29,6 +27,7 @@ export async function getLocalFailureReport(
   siteid: string,
 ): Promise<SavedFailureReport | null> {
   const raw = await AsyncStorage.getItem(buildKey(wonum, siteid));
+
   if (!raw) return null;
 
   try {
@@ -36,11 +35,4 @@ export async function getLocalFailureReport(
   } catch {
     return null;
   }
-}
-
-export async function removeLocalFailureReport(
-  wonum: string,
-  siteid: string,
-): Promise<void> {
-  await AsyncStorage.removeItem(buildKey(wonum, siteid));
 }

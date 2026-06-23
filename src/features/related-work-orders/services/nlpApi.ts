@@ -2,6 +2,8 @@ import { API_CONFIG } from '../../../shared/config/api';
 
 export type ExtractedResponse = {
   transcript?: string;
+  raw_transcript?: string;
+  corrected_transcript?: string;
   extracted?: any;
   payload?: any;
 };
@@ -13,11 +15,13 @@ export type NlpAssetCandidate = {
   siteid?: string;
   parent?: string;
   assettype?: string;
+  source?: string;
   score?: number;
 };
 
 export type NlpRelatedWorkOrderResult = {
   needed?: boolean;
+  reason?: string;
 
   symptoms?: string[];
   equipment?: string[];
@@ -41,15 +45,17 @@ export type NlpRelatedWorkOrderResult = {
   suggested_asset_description?: string;
   suggested_location?: string;
 
-  confidence?: number;
+  confidence?: number | string;
 
   candidates?: NlpAssetCandidate[];
 
   total_assets?: number;
   cleaned_text?: string;
+
+  ml_result?: any;
 };
 
-async function handleJsonResponse(res: Response) {
+async function handleJsonResponse<T>(res: Response): Promise<T> {
   const text = await res.text();
 
   let data: any = null;
@@ -66,7 +72,11 @@ async function handleJsonResponse(res: Response) {
     );
   }
 
-  return data;
+  return data as T;
+}
+
+function baseUrl() {
+  return API_CONFIG.AI_BASE_URL.replace(/\/+$/, '');
 }
 
 export async function transcribeAudio(
@@ -82,7 +92,7 @@ export async function transcribeAudio(
     type: mimeType,
   } as any);
 
-  const url = `${API_CONFIG.NLP_BASE_URL}/transcribe-audio`;
+  const url = `${baseUrl()}/nlp/transcribe-audio`;
 
   const res = await fetch(url, {
     method: 'POST',
@@ -92,26 +102,39 @@ export async function transcribeAudio(
     body: formData,
   });
 
-  return handleJsonResponse(res);
+  return handleJsonResponse<ExtractedResponse>(res);
 }
 
 export async function analyzeRelatedWorkOrderNLP(params: {
   text: string;
   context?: any;
 }): Promise<NlpRelatedWorkOrderResult> {
-  const url = `${API_CONFIG.NLP_BASE_URL}/analyze-related-workorder`;
+  const url = `${baseUrl()}/ai/mcp/call`;
 
   const res = await fetch(url, {
     method: 'POST',
     headers: {
       Accept: 'application/json',
-      'Content-Type': 'application/json',
+      'Content-Type': 'application/json; charset=utf-8',
     },
     body: JSON.stringify({
-      text: params.text,
-      context: params.context ?? {},
+      tool_name: 'suggest_related_workorder',
+      arguments: {
+        text: [
+          'Créer un work order lié.',
+          params.text,
+        ].join(' '),
+        context: {
+          ...(params.context ?? {}),
+          intent: 'related_workorder',
+          force_intent: 'related_workorder',
+        },
+        failure: (params.context ?? {})?.failure ?? {},
+      },
     }),
   });
 
-  return handleJsonResponse(res);
+  const data = await handleJsonResponse<any>(res);
+
+  return data?.result || data || {};
 }

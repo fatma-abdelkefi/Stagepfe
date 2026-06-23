@@ -9,6 +9,7 @@ import {
   ImageSourcePropType,
 } from 'react-native';
 import FeatherIcon from 'react-native-vector-icons/Feather';
+import { colors } from '../../../shared/theme/colors';
 
 type Props = {
   title: string;
@@ -36,12 +37,15 @@ export default function WorkOrderCategoryCard({
   return (
     <TouchableOpacity
       style={[styles.card, { width, height }]}
-      activeOpacity={0.85}
+      activeOpacity={0.8}
       onPress={onPress}
     >
+      {/* Top row: icon + plus button */}
       <View style={styles.topRow}>
-        <View style={styles.iconContainer}>
-          <Image source={icon} style={styles.iconImage} resizeMode="contain" />
+        <View style={styles.iconWrapper}>
+          <View style={styles.iconContainer}>
+            <Image source={icon} style={styles.iconImage} resizeMode="contain" />
+          </View>
         </View>
 
         {showPlus && !!onPlusPress && (
@@ -58,93 +62,122 @@ export default function WorkOrderCategoryCard({
           >
             <FeatherIcon
               name="plus"
-              size={15}
-              color={plusDisabled ? '#566079' : '#8f9ab8'}
+              size={14}
+              color={plusDisabled ? colors.mutedText : colors.primary}
             />
           </Pressable>
         )}
       </View>
 
-      <View>
+      {/* Bottom: count + label */}
+      <View style={styles.bottomContent}>
         <Text style={styles.countText}>{count}</Text>
-
-        <Text style={styles.name} numberOfLines={1}>
+        <Text style={styles.labelText} numberOfLines={2}>
           {title}
         </Text>
       </View>
 
+      {/* Decorative corner */}
       <View style={styles.decorCircle} />
+      <View style={styles.decorCircleSmall} />
     </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#111522',
-    borderRadius: 18,
+    backgroundColor: colors.surface,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#202639',
-    padding: 14,
+    borderColor: colors.border,
+    padding: 12,
     justifyContent: 'space-between',
     overflow: 'hidden',
 
-    shadowColor: '#000',
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 4,
+    shadowColor: colors.primary,
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
   },
+
   topRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
   },
-  iconContainer: {
-    width: 38,
-    height: 38,
+
+  iconWrapper: {
     borderRadius: 12,
-    backgroundColor: '#1a2033',
+    backgroundColor: '#eff6ff',
+    padding: 2,
+  },
+  iconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
   iconImage: {
-    width: 22,
-    height: 22,
+    width: 20,
+    height: 20,
+    tintColor: colors.white,
   },
+
   plusButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 9,
-    backgroundColor: '#1a2033',
-    borderWidth: 1,
-    borderColor: '#27304a',
+    width: 26,
+    height: 26,
+    borderRadius: 8,
+    backgroundColor: '#eff6ff',
+    borderWidth: 1.5,
+    borderColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 20,
-    elevation: 6,
+    elevation: 2,
   },
   plusButtonDisabled: {
-    opacity: 0.45,
+    backgroundColor: colors.surfaceAlt,
+    borderColor: colors.border,
+    opacity: 0.6,
+  },
+
+  bottomContent: {
+    gap: 2,
   },
   countText: {
-    fontSize: 28,
-    color: '#ffffff',
+    fontSize: 26,
+    color: colors.text,
     fontWeight: '800',
-    lineHeight: 32,
-    marginBottom: 2,
+    lineHeight: 30,
   },
-  name: {
-    fontSize: 12,
-    color: '#405081',
-    fontWeight: '700',
+  labelText: {
+    fontSize: 11,
+    color: colors.textSub,
+    fontWeight: '600',
+    lineHeight: 14,
   },
+
   decorCircle: {
     position: 'absolute',
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    right: -28,
-    bottom: -26,
-    backgroundColor: 'rgba(109, 92, 255, 0.14)',
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    right: -30,
+    bottom: -30,
+    backgroundColor: '#dbeafe',
+    opacity: 0.5,
+  },
+  decorCircleSmall: {
+    position: 'absolute',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    right: 20,
+    bottom: -16,
+    backgroundColor: '#bfdbfe',
+    opacity: 0.4,
   },
 });

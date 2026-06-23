@@ -19,6 +19,28 @@ import type {
 
 import type { CommonChatbotQuestion } from '../../../shared/components/common/CommonChatbotModal';
 
+type RelatedWOStatus =
+  | 'needed'
+  | 'possible'
+  | 'not_needed'
+  | 'asset_ambiguous'
+  | 'asset_not_found'
+  | 'partial'
+  | 'insufficient_text'
+  | 'model_unavailable'
+  | 'error'
+  | 'unknown';
+
+type AssetCandidate = {
+  assetnum?: string;
+  value?: string | boolean;
+  description?: string;
+  location?: string;
+  confidence?: number;
+};
+
+const ASSET_CONFIDENCE_THRESHOLD = 0.6;
+
 function safeTrim(value: unknown): string {
   return typeof value === 'string' ? value.trim() : String(value ?? '').trim();
 }
@@ -44,7 +66,6 @@ function normalizeAiText(value: unknown): string {
     .replace(/faune vibration/gi, 'une vibration')
     .replace(/moteur principale/gi, 'moteur principal')
     .replace(/moteur principale convoyeur/gi, 'moteur principal convoyeur')
-    .replace(/pompe hydraulique/gi, 'pompe hydraulique')
     .replace(/pompe hydrolique/gi, 'pompe hydraulique')
     .replace(/équipement concerné/gi, "l’équipement concerné")
     .replace(/equipement concerné/gi, "l’équipement concerné")
@@ -53,6 +74,7 @@ function normalizeAiText(value: unknown): string {
     .replace(/équiper$/gi, 'équipement')
     .trim();
 }
+
 function capitalizeFirst(value: string): string {
   const text = safeTrim(value);
 
@@ -61,6 +83,22 @@ function capitalizeFirst(value: string): string {
   }
 
   return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function getCandidateAssetnum(item: AssetCandidate): string {
+  const direct = safeTrim(item?.assetnum);
+
+  if (direct) {
+    return direct;
+  }
+
+  const value = item?.value;
+
+  if (typeof value === 'string') {
+    return safeTrim(value);
+  }
+
+  return '';
 }
 
 function buildProfessionalDescription(requestText: string, related: any): string {
@@ -143,6 +181,33 @@ function buildProfessionalDetails(
   );
 }
 
+function getAllCandidates(related: any): AssetCandidate[] {
+  const raw = [
+    ...(Array.isArray(related?.candidates) ? related.candidates : []),
+    ...(Array.isArray(related?.asset_candidates) ? related.asset_candidates : []),
+    ...(Array.isArray(related?.nlp_result?.candidates)
+      ? related.nlp_result.candidates
+      : []),
+    ...(Array.isArray(related?.asset_prediction?.top_predictions)
+      ? related.asset_prediction.top_predictions
+      : []),
+  ];
+
+  return raw
+    .filter(item => {
+      const assetnum = getCandidateAssetnum(item);
+      return !!assetnum && assetnum !== 'true' && assetnum !== 'false';
+    })
+    .filter(
+      (item, index, arr) =>
+        arr.findIndex(
+          x =>
+            getCandidateAssetnum(x).toUpperCase() ===
+            getCandidateAssetnum(item).toUpperCase(),
+        ) === index,
+    );
+}
+
 function getCandidateByAssetnum(related: any, value: string): any | null {
   const assetnum = safeTrim(value);
 
@@ -150,20 +215,48 @@ function getCandidateByAssetnum(related: any, value: string): any | null {
     return null;
   }
 
-  const candidates =
-    related?.candidates ||
-    related?.asset_candidates ||
-    related?.nlp_result?.candidates ||
-    [];
-
-  if (!Array.isArray(candidates)) {
-    return null;
-  }
+  const candidates = getAllCandidates(related);
 
   return (
     candidates.find(
-      item => safeTrim(item?.assetnum).toUpperCase() === assetnum.toUpperCase(),
+      item => getCandidateAssetnum(item).toUpperCase() === assetnum.toUpperCase(),
     ) || null
+  );
+}
+
+function getAIStatus(related: any): RelatedWOStatus {
+  const status = safeTrim(related?.status) as RelatedWOStatus;
+
+  if (status) {
+    return status;
+  }
+
+  if (related?.needed === false) {
+    return 'not_needed';
+  }
+
+  if (related?.needed === true) {
+    const asset = safeTrim(related?.assetnum || related?.suggested_assetnum);
+
+    if (!asset) {
+      return 'asset_not_found';
+    }
+
+    const reliable =
+      related?.asset_match_reliable === true ||
+      Number(related?.asset_confidence || 0) >= ASSET_CONFIDENCE_THRESHOLD;
+
+    return reliable ? 'needed' : 'asset_ambiguous';
+  }
+
+  return 'unknown';
+}
+
+function isAssetReliable(related: any): boolean {
+  return (
+    related?.asset_match_reliable === true ||
+    Number(related?.asset_confidence || 0) >= ASSET_CONFIDENCE_THRESHOLD ||
+    getAIStatus(related) === 'needed'
   );
 }
 
@@ -213,6 +306,7 @@ export function useAddRelatedWorkOrderViewModel(
   const [chatbotAnswer, setChatbotAnswer] = useState('');
   const [pendingAIResult, setPendingAIResult] =
     useState<RelatedWorkOrderAIResult | null>(null);
+  const [pendingAIRequestText, setPendingAIRequestText] = useState('');
 
   const [successVisible, setSuccessVisible] = useState(false);
   const [successTitle] = useState('Succès');
@@ -288,7 +382,14 @@ export function useAddRelatedWorkOrderViewModel(
       }
 
       const res = await transcribeAudio(finalUri, 'recording.m4a', 'audio/mp4');
-      const transcriptText = String(res?.transcript || '').trim();
+
+      const transcriptText =
+        String((res as any)?.corrected_transcript || '').trim() ||
+        String((res as any)?.cleaned_text || '').trim() ||
+        String(res?.transcript || '').trim() ||
+        String((res as any)?.raw_transcript || '').trim() ||
+        String((res as any)?.payload?.text || '').trim() ||
+        String((res as any)?.extracted?.text || '').trim();
 
       setTranscript(transcriptText);
 
@@ -298,7 +399,7 @@ export function useAddRelatedWorkOrderViewModel(
         return;
       }
 
-      setDetails(transcriptText);
+      setDetails(normalizeAiText(transcriptText));
       setVoiceError(false);
       setVoiceInfo('Détails remplis par transcription vocale.');
     } catch (e: any) {
@@ -344,58 +445,79 @@ export function useAddRelatedWorkOrderViewModel(
   };
 
   const openAssetClarification = (related: RelatedWorkOrderAIResult | null) => {
-  setPendingAIResult(related);
+    setPendingAIResult(related);
 
-  const originalAsset = safeTrim((params as any)?.assetnum);
-  const originalAssetDescription = safeTrim((params as any)?.asset_description);
+    const originalAsset = safeTrim((params as any)?.assetnum);
+    const originalAssetDescription = safeTrim(
+      (params as any)?.asset_description || (params as any)?.assetDescription,
+    );
+    const originalLocation = safeTrim((params as any)?.location);
 
-  const candidates = related?.candidates || [];
+    const candidates = getAllCandidates(related)
+      .filter(
+        item =>
+          getCandidateAssetnum(item).toUpperCase() !== originalAsset.toUpperCase(),
+      )
+      .slice(0, 5);
 
-  const candidateOptions = candidates
-    .filter(item => safeTrim(item?.assetnum))
-    .slice(0, 5)
-    .map(item => ({
-      label: `${safeTrim(item.assetnum)}${
-        item.description ? ` - ${safeTrim(item.description)}` : ''
-      }`,
-      value: `candidate:${safeTrim(item.assetnum)}`,
-      icon: 'cpu',
-    }));
+    const candidateOptions = candidates.map(item => {
+      const candidateAssetnum = getCandidateAssetnum(item);
+      const candidateDescription = safeTrim(item.description);
+      const candidateLocation = safeTrim(item.location);
+      const confidence = Number(item.confidence || 0);
 
-  const options = [
-    ...(originalAsset
-      ? [
-          {
-            label: originalAssetDescription
-              ? `Même asset que le WO d'origine : ${originalAsset} - ${originalAssetDescription}`
-              : `Même asset que le WO d'origine : ${originalAsset}`,
-            value: 'same_asset',
-            icon: 'check-circle',
-          },
-        ]
-      : []),
-    ...candidateOptions,
-    {
-      label: 'Je vais saisir manuellement',
-      value: 'manual_asset',
-      icon: 'edit-3',
-    },
-    {
-      label: 'Je ne sais pas',
-      value: 'unknown_asset',
-      icon: 'help-circle',
-    },
-  ];
+      return {
+        label: `${candidateAssetnum}${
+          candidateDescription ? ` - ${candidateDescription}` : ''
+        }${candidateLocation ? `\nLocation : ${candidateLocation}` : ''}${
+          confidence ? `\nConfiance : ${Math.round(confidence * 100)}%` : ''
+        }`,
+        value: `candidate:${candidateAssetnum}`,
+        icon: 'cpu',
+      };
+    });
 
-  setChatbotQuestion({
-    title: 'Asset à confirmer',
-    message: 'Quel asset voulez-vous utiliser pour ce Work Order lié ?',
-    options,
-  });
+    const options = [
+      ...(originalAsset
+        ? [
+            {
+              label: originalAssetDescription
+                ? `Oui, utiliser l'asset du WO d'origine : ${originalAsset} - ${originalAssetDescription}${
+                    originalLocation ? `\nLocation : ${originalLocation}` : ''
+                  }`
+                : `Oui, utiliser l'asset du WO d'origine : ${originalAsset}`,
+              value: 'same_asset',
+              icon: 'check-circle',
+            },
+          ]
+        : []),
 
-  setChatbotAnswer('');
-  setChatbotVisible(true);
-};
+      ...candidateOptions,
+
+      {
+        label: 'Non, je vais saisir un autre asset',
+        value: 'manual_asset',
+        icon: 'edit-3',
+      },
+
+      {
+        label: 'Je ne sais pas',
+        value: 'unknown_asset',
+        icon: 'help-circle',
+      },
+    ];
+
+    setChatbotQuestion({
+      title: 'Asset non confirmé',
+      message:
+        "Est-ce que la panne concerne le même asset que le Work Order d'origine ?",
+      options,
+    });
+
+    setChatbotAnswer('');
+    setChatbotVisible(true);
+  };
+
   const openLocationClarification = () => {
     setChatbotQuestion({
       title: 'Location manquante',
@@ -407,24 +529,257 @@ export function useAddRelatedWorkOrderViewModel(
     setChatbotVisible(true);
   };
 
-  const openClarificationIfNeeded = (
+  const openNeededConfirmation = (related: RelatedWorkOrderAIResult | null) => {
+    setPendingAIResult(related);
+
+    setChatbotQuestion({
+      title: 'Confirmation requise',
+      message:
+        safeTrim((related as any)?.message) ||
+        'Une intervention complémentaire semble possible. Voulez-vous créer un Work Order lié ?',
+      options: [
+        {
+          label: 'Oui, créer un Work Order lié',
+          value: 'confirm_related_wo',
+          icon: 'check-circle',
+        },
+        {
+          label: 'Non, aucun Work Order lié nécessaire',
+          value: 'cancel_related_wo',
+          icon: 'x-circle',
+        },
+      ],
+    });
+
+    setChatbotAnswer('');
+    setChatbotVisible(true);
+  };
+
+  const fillFormFromAI = (
+    requestText: string,
+    related: RelatedWorkOrderAIResult | null,
+    options?: {
+      allowUnreliableAsset?: boolean;
+      forceAsset?: string;
+      forceLocation?: string;
+    },
+  ) => {
+    const relatedAny = related as any;
+
+    const aiAsset =
+      safeTrim(options?.forceAsset) ||
+      safeTrim(relatedAny?.assetnum) ||
+      safeTrim(relatedAny?.suggested_assetnum);
+
+    const aiLocation =
+      safeTrim(options?.forceLocation) ||
+      safeTrim(relatedAny?.location) ||
+      safeTrim(relatedAny?.suggested_location);
+
+    const aiAssetDescription =
+      safeTrim(relatedAny?.asset_description) ||
+      safeTrim(relatedAny?.suggested_asset_description) ||
+      safeTrim(relatedAny?.nlp_result?.asset_description);
+
+    const reliableAsset =
+      options?.allowUnreliableAsset === true || isAssetReliable(relatedAny);
+
+    const nextAsset = reliableAsset ? aiAsset : '';
+    const nextLocation = reliableAsset ? aiLocation : '';
+    const nextAssetDescription = reliableAsset ? aiAssetDescription : '';
+
+    const assetLabel =
+      nextAsset && nextAssetDescription
+        ? `${nextAsset} - ${nextAssetDescription}`
+        : nextAsset || "l’équipement concerné";
+
+    const rawDescription =
+      safeTrim(relatedAny?.description) ||
+      safeTrim(relatedAny?.suggested_description);
+
+    const finalDescription =
+      rawDescription && rawDescription.length <= 70
+        ? normalizeAiText(rawDescription)
+        : buildProfessionalDescription(requestText, relatedAny);
+
+    const rawDetails =
+      safeTrim(relatedAny?.details) || safeTrim(relatedAny?.suggested_details);
+
+    const finalDetails =
+      rawDetails && rawDetails.length <= 400 && !rawDetails.includes('Raison IA')
+        ? capitalizeFirst(normalizeAiText(rawDetails))
+        : buildProfessionalDetails(requestText, relatedAny, assetLabel);
+
+    setDescription(finalDescription || 'Inspection complémentaire équipement');
+    setDetails(finalDetails);
+
+    if (nextAsset) {
+      setAssetnum(nextAsset);
+    } else {
+      setAssetnum('');
+    }
+
+    if (nextAssetDescription) {
+      setAssetDescription(nextAssetDescription);
+    } else {
+      setAssetDescription('');
+    }
+
+    if (nextLocation) {
+      setLocation(nextLocation);
+    }
+  };
+
+  const handleAIStatus = (
+    requestText: string,
     related: RelatedWorkOrderAIResult | null,
   ) => {
-    const aiAsset = safeTrim(related?.assetnum);
-    const aiLocation = safeTrim(related?.location);
-    const assetReliable = related?.asset_match_reliable === true;
-
-    if (!aiAsset || !assetReliable) {
-      openAssetClarification(related);
-      return true;
+    if (!related) {
+      setAiError(true);
+      setAiInfo('Aucune recommandation IA reçue.');
+      return;
     }
 
-    if (!aiLocation && !safeTrim(location)) {
-      openLocationClarification();
-      return true;
-    }
+    const relatedAny = related as any;
+    const status = getAIStatus(relatedAny);
 
-    return false;
+    setAiResult(related);
+    setPendingAIResult(related);
+    setPendingAIRequestText(requestText);
+
+    switch (status) {
+      case 'not_needed': {
+        setAiError(false);
+        setAiInfo(
+          safeTrim(relatedAny?.message) ||
+            "Aucun Work Order lié n'est nécessaire.",
+        );
+        return;
+      }
+
+      case 'insufficient_text': {
+        setAiError(true);
+        setAiInfo(
+          safeTrim(relatedAny?.message) ||
+            'Veuillez préciser le problème ou l’équipement concerné.',
+        );
+        return;
+      }
+
+      case 'model_unavailable': {
+        setAiError(true);
+        setAiInfo(
+          safeTrim(relatedAny?.message) ||
+            'Service IA indisponible. Vous pouvez continuer en mode manuel.',
+        );
+        return;
+      }
+
+      case 'error': {
+        setAiError(true);
+        setAiInfo(
+          safeTrim(relatedAny?.message) ||
+            'Erreur IA. Vous pouvez continuer en mode manuel.',
+        );
+        return;
+      }
+
+      case 'possible': {
+        fillFormFromAI(requestText, related, {
+          allowUnreliableAsset: false,
+        });
+
+        setAiError(false);
+        setAiInfo(
+          safeTrim(relatedAny?.message) ||
+            'Une intervention complémentaire semble possible.',
+        );
+
+        setAiModalVisible(false);
+        openNeededConfirmation(related);
+        return;
+      }
+
+      case 'asset_ambiguous': {
+        fillFormFromAI(requestText, related, {
+          allowUnreliableAsset: false,
+        });
+
+        setAiError(false);
+        setAiInfo('Asset non confirmé. Veuillez choisir l’asset concerné.');
+        setAiModalVisible(false);
+        openAssetClarification(related);
+        return;
+      }
+
+      case 'asset_not_found': {
+        fillFormFromAI(requestText, related, {
+          allowUnreliableAsset: false,
+        });
+
+        setAiError(true);
+        setAiInfo(
+          safeTrim(relatedAny?.message) ||
+            'Aucun asset fiable n’a été détecté. Veuillez saisir l’asset manuellement.',
+        );
+        setAiModalVisible(false);
+        return;
+      }
+
+      case 'partial': {
+        fillFormFromAI(requestText, related, {
+          allowUnreliableAsset: false,
+        });
+
+        setAiError(false);
+        setAiInfo(
+          safeTrim(relatedAny?.message) ||
+            'Résultat partiel. Veuillez vérifier et compléter les champs.',
+        );
+        setAiModalVisible(false);
+
+        if (!safeTrim(location)) {
+          openLocationClarification();
+        }
+
+        return;
+      }
+
+      case 'needed':
+      default: {
+        fillFormFromAI(requestText, related, {
+          allowUnreliableAsset: true,
+        });
+
+        const finalAsset = safeTrim(
+          relatedAny?.assetnum || relatedAny?.suggested_assetnum,
+        );
+        const finalLocation = safeTrim(
+          relatedAny?.location || relatedAny?.suggested_location,
+        );
+
+        if (!finalAsset) {
+          setAiError(false);
+          setAiInfo('Champs remplis. Veuillez sélectionner un asset.');
+          setAiModalVisible(false);
+          openAssetClarification(related);
+          return;
+        }
+
+        if (!finalLocation && !safeTrim(location)) {
+          setAiError(false);
+          setAiInfo('Champs remplis. Veuillez préciser la location.');
+          setAiModalVisible(false);
+          openLocationClarification();
+          return;
+        }
+
+        setAiError(false);
+        setAiInfo('Work Order lié généré avec succès.');
+        setAiModalVisible(false);
+        return;
+      }
+    }
   };
 
   const submitChatbotAnswer = (answerValue?: string) => {
@@ -432,10 +787,29 @@ export function useAddRelatedWorkOrderViewModel(
 
     if (!chatbotQuestion) return;
 
+    if (value === 'confirm_related_wo') {
+      fillFormFromAI(pendingAIRequestText || aiRequestText, pendingAIResult, {
+        allowUnreliableAsset: true,
+      });
+
+      setAiError(false);
+      setAiInfo('Création du Work Order lié confirmée. Vérifiez les champs.');
+      closeChatbot();
+      return;
+    }
+
+    if (value === 'cancel_related_wo') {
+      setAiError(false);
+      setAiInfo("Aucun Work Order lié ne sera créé.");
+      closeChatbot();
+      return;
+    }
+
     if (value === 'same_asset') {
       const originalAsset = safeTrim((params as any)?.assetnum);
       const originalAssetDescription = safeTrim(
-        (params as any)?.asset_description,
+        (params as any)?.asset_description ||
+          (params as any)?.assetDescription,
       );
       const originalLocation = safeTrim((params as any)?.location);
 
@@ -493,7 +867,22 @@ export function useAddRelatedWorkOrderViewModel(
 
     if (value.startsWith('candidate:')) {
       const candidateAssetnum = safeTrim(value.replace('candidate:', ''));
-      const candidate = getCandidateByAssetnum(pendingAIResult, candidateAssetnum);
+
+      const candidate = getCandidateByAssetnum(
+        pendingAIResult,
+        candidateAssetnum,
+      );
+
+      const oldAssetnum =
+        safeTrim((pendingAIResult as any)?.assetnum) ||
+        safeTrim((pendingAIResult as any)?.suggested_assetnum);
+
+      const currentDetails = safeTrim(details);
+
+      const updatedDetails =
+        oldAssetnum && candidateAssetnum
+          ? currentDetails.replace(new RegExp(oldAssetnum, 'gi'), candidateAssetnum)
+          : currentDetails;
 
       setAssetnum(candidateAssetnum);
 
@@ -507,13 +896,22 @@ export function useAddRelatedWorkOrderViewModel(
         setLocation(safeTrim(candidate.location));
       }
 
+      setDetails(updatedDetails);
+
       setAiError(false);
       setAiInfo('Asset rempli depuis le candidat sélectionné.');
+
       closeChatbot();
       return;
     }
 
     if (chatbotQuestion.title === 'Location manquante') {
+      if (!value) {
+        setAiError(true);
+        setAiInfo('Veuillez saisir une location.');
+        return;
+      }
+
       setLocation(value);
       setAiError(false);
       setAiInfo('Location remplie depuis votre réponse.');
@@ -526,13 +924,25 @@ export function useAddRelatedWorkOrderViewModel(
   };
 
   const buildAIContext = (requestText: string) => {
-    return {
+    const context = {
       description: safeTrim(params?.description) || safeTrim(description),
-      assetnum: safeTrim((params as any)?.assetnum) || safeTrim(assetnum),
+
+      assetnum:
+        safeTrim((params as any)?.assetnum) ||
+        safeTrim((params as any)?.asset) ||
+        safeTrim(assetnum),
+
       asset_description:
         safeTrim((params as any)?.asset_description) ||
+        safeTrim((params as any)?.assetDescription) ||
+        safeTrim((params as any)?.assetdesc) ||
         safeTrim(assetDescription),
-      location: safeTrim((params as any)?.location) || safeTrim(location),
+
+      location:
+        safeTrim((params as any)?.location) ||
+        safeTrim((params as any)?.locationnum) ||
+        safeTrim(location),
+
       worktype: safeTrim((params as any)?.worktype),
       priority: (params as any)?.priority,
       worklog: requestText,
@@ -549,97 +959,10 @@ export function useAddRelatedWorkOrderViewModel(
         remedy: safeTrim((params as any)?.failure?.remedy),
       },
     };
-  };
 
-  const applyAIResult = (
-    requestText: string,
-    related: RelatedWorkOrderAIResult | null,
-  ) => {
-    if (!related) {
-      setAiError(true);
-      setAiInfo('Aucune recommandation NLP reçue.');
-      return;
-    }
+    console.log('RELATED WO AI CONTEXT =', JSON.stringify(context, null, 2));
 
-    const relatedAny = related as any;
-    setAiResult(related);
-
-    if (!relatedAny.needed) {
-      setAiError(false);
-      setAiInfo("NLP : aucun Work Order lié n'est nécessaire.");
-      return;
-    }
-
-    const assetReliable = relatedAny.asset_match_reliable === true;
-
-    const aiAsset = safeTrim(relatedAny.assetnum);
-    const aiLocation = safeTrim(relatedAny.location);
-
-    const aiAssetDescription =
-      safeTrim(relatedAny.asset_description) ||
-      safeTrim(relatedAny.suggested_asset_description) ||
-      safeTrim(relatedAny.nlp_result?.asset_description);
-
-    const nextAsset = assetReliable ? aiAsset : '';
-    const nextLocation = assetReliable ? aiLocation : '';
-    const nextAssetDescription = assetReliable ? aiAssetDescription : '';
-
-    const assetLabel =
-      nextAsset && nextAssetDescription
-        ? `${nextAsset} - ${nextAssetDescription}`
-        : nextAsset || "l’équipement concerné";
-
-    const rawDescription =
-      safeTrim(relatedAny.description) ||
-      safeTrim(relatedAny.suggested_description);
-
-    const finalDescription =
-      rawDescription && rawDescription.length <= 60
-        ? normalizeAiText(rawDescription)
-        : buildProfessionalDescription(requestText, relatedAny);
-
-    const rawDetails =
-      safeTrim(relatedAny.details) || safeTrim(relatedAny.suggested_details);
-
-    const finalDetails =
-      rawDetails && rawDetails.length <= 300 && !rawDetails.includes('Raison IA')
-        ? capitalizeFirst(normalizeAiText(rawDetails))
-        : buildProfessionalDetails(requestText, relatedAny, assetLabel);
-
-    setDescription(finalDescription || 'Inspection complémentaire équipement');
-    setDetails(finalDetails);
-
-    setAssetnum(nextAsset);
-
-    if (nextAssetDescription) {
-      setAssetDescription(nextAssetDescription);
-    } else {
-      setAssetDescription('');
-    }
-
-    if (nextLocation) {
-      setLocation(nextLocation);
-    }
-
-    const openedClarification = openClarificationIfNeeded(related);
-
-    if (openedClarification) {
-      setAiError(false);
-      setAiInfo('Des informations supplémentaires sont nécessaires.');
-      return;
-    }
-
-    setAiError(false);
-
-    if (!nextAsset && !nextLocation) {
-      setAiInfo(
-        'NLP : description et détails remplis. Asset et location à sélectionner.',
-      );
-    } else if (!nextAsset) {
-      setAiInfo('NLP : champs remplis. Asset à sélectionner.');
-    } else {
-      setAiInfo('NLP : champs remplis automatiquement.');
-    }
+    return context;
   };
 
   const generateWithAI = async (requestText?: string) => {
@@ -664,14 +987,10 @@ export function useAddRelatedWorkOrderViewModel(
 
       const related = getRelatedWorkOrderAIResult(data);
 
-      applyAIResult(cleanRequest, related);
-
-      if (related?.needed) {
-        setAiModalVisible(false);
-      }
+      handleAIStatus(cleanRequest, related);
     } catch (e: any) {
       setAiError(true);
-      setAiInfo(e?.message || 'Erreur pendant la génération NLP.');
+      setAiInfo(e?.message || 'Erreur pendant la génération IA.');
     } finally {
       setAiLoading(false);
     }
@@ -718,7 +1037,12 @@ export function useAddRelatedWorkOrderViewModel(
       }
 
       const res = await transcribeAudio(finalUri, 'ai_request.m4a', 'audio/mp4');
-      const transcriptText = String(res?.transcript || '').trim();
+
+      const transcriptText =
+        String((res as any)?.corrected_transcript || '').trim() ||
+        String((res as any)?.cleaned_text || '').trim() ||
+        String(res?.transcript || '').trim() ||
+        String((res as any)?.raw_transcript || '').trim();
 
       if (!transcriptText) {
         setAiError(true);
@@ -726,11 +1050,11 @@ export function useAddRelatedWorkOrderViewModel(
         return;
       }
 
-      setAiRequestText(transcriptText);
-      setAiError(false);
-      setAiInfo('Demande transcrite. Analyse en cours...');
+      const cleanTranscript = normalizeAiText(transcriptText);
 
-      await generateWithAI(transcriptText);
+      setAiRequestText(cleanTranscript);
+      setAiError(false);
+      setAiInfo('Demande transcrite. Cliquez sur Générer pour analyser.');
     } catch (e: any) {
       setAiError(true);
       setAiInfo(e?.message || "Erreur pendant l'analyse vocale.");

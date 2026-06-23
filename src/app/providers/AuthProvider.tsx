@@ -21,7 +21,7 @@ type AuthContextType = {
   clearSession: () => Promise<void>;
 };
 
-const STORAGE_KEY = '@auth_session';
+export const STORAGE_KEY = '@auth_session'; // ← exporté pour maximoClient
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -29,25 +29,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSessionState] = useState<AuthSession | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
-  useEffect(() => {
-    const loadSession = async () => {
-      try {
-        const raw = await AsyncStorage.getItem(STORAGE_KEY);
-
-        if (raw) {
-          const parsed: AuthSession = JSON.parse(raw);
-
-          if (parsed?.username && parsed?.password) {
-            setSessionState(parsed);
-          }
+  const loadSession = async () => {
+    try {
+      const raw = await AsyncStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed: AuthSession = JSON.parse(raw);
+        if (parsed?.username && parsed?.password) {
+          setSessionState(parsed);
         }
-      } catch (error) {
-        console.log('Failed to load auth session:', error);
-      } finally {
-        setAuthLoading(false);
+      } else {
+        // Si le storage est vide (effacé par l'intercepteur), on remet null
+        setSessionState(null);
       }
-    };
+    } catch (error) {
+      console.log('Failed to load auth session:', error);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
 
+  useEffect(() => {
     loadSession();
   }, []);
 
@@ -88,10 +89,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
 export function useAuth() {
   const context = useContext(AuthContext);
-
   if (!context) {
     throw new Error('useAuth must be used inside AuthProvider');
   }
-
   return context;
 }

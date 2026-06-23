@@ -71,6 +71,7 @@ export default function AddWorkLogScreen({ route }: Props) {
   function getCurrentDateTimeForDisplay() {
     const d = new Date();
     const pad2 = (n: number) => String(n).padStart(2, '0');
+
     return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()}  ${pad2(
       d.getHours(),
     )}:${pad2(d.getMinutes())}`;
@@ -157,9 +158,7 @@ export default function AddWorkLogScreen({ route }: Props) {
               : 'Appuyez pour dicter'}
           </Text>
 
-          {vm.recording && (
-            <View style={styles.pulseRing} pointerEvents="none" />
-          )}
+          {vm.recording && <View style={styles.pulseRing} pointerEvents="none" />}
 
           {vm.voiceInfo ? (
             <View
@@ -188,16 +187,6 @@ export default function AddWorkLogScreen({ route }: Props) {
             </View>
           ) : null}
         </View>
-
-        {vm.transcript ? (
-          <View style={styles.transcriptBox}>
-            <View style={styles.transcriptHeader}>
-              <FeatherIcon name="file-text" size={13} color={C.textSub} />
-              <Text style={styles.transcriptLabel}>Transcription</Text>
-            </View>
-            <Text style={styles.transcriptText}>{vm.transcript}</Text>
-          </View>
-        ) : null}
 
         <Text style={styles.sectionLabel}>INFORMATIONS</Text>
 
@@ -234,6 +223,7 @@ export default function AddWorkLogScreen({ route }: Props) {
 
           <View style={styles.fieldGroup}>
             <Text style={styles.fieldLabel}>Type</Text>
+
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -241,6 +231,7 @@ export default function AddWorkLogScreen({ route }: Props) {
             >
               {WORKLOG_TYPES.map(item => {
                 const active = item.value === vm.selectedType.value;
+
                 return (
                   <TouchableOpacity
                     key={item.value}
@@ -256,6 +247,7 @@ export default function AddWorkLogScreen({ route }: Props) {
                         style={{ marginRight: 4 }}
                       />
                     )}
+
                     <Text
                       style={[
                         styles.typeChipText,
@@ -275,12 +267,33 @@ export default function AddWorkLogScreen({ route }: Props) {
               <Text style={styles.fieldLabel}>Résumé</Text>
               <Text style={styles.requiredDot}>*</Text>
             </View>
+
             <AppInput
               icon="file-text"
               value={vm.description}
               onChangeText={vm.setDescription}
               returnKeyType="done"
             />
+
+            <View style={styles.counterRow}>
+              <Text
+                style={[
+                  styles.counterText,
+                  vm.descriptionTooLong && styles.counterTextError,
+                ]}
+              >
+                {vm.descriptionLength}/{vm.maxDescriptionLength} caractères
+              </Text>
+            </View>
+
+            {vm.descriptionTooLong ? (
+              <View style={styles.inlineError}>
+                <FeatherIcon name="alert-circle" size={13} color={C.errorText} />
+                <Text style={styles.inlineErrorText}>
+                  {vm.descriptionLimitMessage}
+                </Text>
+              </View>
+            ) : null}
           </View>
         </View>
 
@@ -304,6 +317,7 @@ export default function AddWorkLogScreen({ route }: Props) {
             <Text style={[styles.toastText, { color: C.successText }]}>
               Work Log ajouté avec succès !
             </Text>
+
             <TouchableOpacity
               onPress={vm.closeSuccess}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -322,6 +336,7 @@ export default function AddWorkLogScreen({ route }: Props) {
             >
               {vm.errorMessage}
             </Text>
+
             <TouchableOpacity
               onPress={vm.closeError}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -342,11 +357,12 @@ export default function AddWorkLogScreen({ route }: Props) {
 
           <TouchableOpacity
             onPress={vm.submit}
-            disabled={!vm.canSubmit || vm.saving}
+            disabled={!vm.canSubmit || vm.saving || vm.descriptionTooLong}
             activeOpacity={0.85}
             style={[
               styles.submitBtn,
-              (!vm.canSubmit || vm.saving) && styles.submitBtnDisabled,
+              (!vm.canSubmit || vm.saving || vm.descriptionTooLong) &&
+                styles.submitBtnDisabled,
             ]}
           >
             {vm.saving ? (
@@ -421,7 +437,9 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 
-  scroll: { flex: 1 },
+  scroll: {
+    flex: 1,
+  },
   scrollContent: {
     paddingHorizontal: 16,
     paddingTop: 20,
@@ -715,5 +733,37 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 12,
     fontWeight: '600',
+  },
+
+  counterRow: {
+    alignItems: 'flex-end',
+    marginTop: 4,
+  },
+  counterText: {
+    color: C.textMuted,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  counterTextError: {
+    color: C.errorText,
+  },
+  inlineError: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: C.errorBg,
+    borderWidth: 1,
+    borderColor: C.errorBorder,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginTop: 6,
+  },
+  inlineErrorText: {
+    flex: 1,
+    color: C.errorText,
+    fontSize: 11,
+    fontWeight: '600',
+    lineHeight: 16,
   },
 });

@@ -27,6 +27,7 @@ import FailureReportingScreen from '../../features/failure-reporting/screens/Fai
 import FailureReportingDetailsScreen from '../../features/failure-reporting/screens/FailureReportingDetailsScreen';
 import AddRelatedWorkOrderScreen from '../../features/related-work-orders/screens/AddRelatedWorkOrderScreen';
 import RelatedWorkOrdersListScreen from '../../features/related-work-orders/screens/RelatedWorkOrdersListScreen';
+import AddWorkOrderScreen from '../../features/add-workorder/screens/AddWorkOrderScreen';
 
 import { useAuth } from '../providers/AuthProvider';
 
@@ -93,6 +94,13 @@ export default function AppNavigator() {
           <Stack.Screen
           name="RelatedWorkOrdersList"
           component={RelatedWorkOrdersListScreen}
+        />
+          <Stack.Screen
+          name="AddWorkOrder"
+          component={AddWorkOrderScreen}
+          options={{
+            headerShown: false,
+          }}
         />
         </>
       ) : (

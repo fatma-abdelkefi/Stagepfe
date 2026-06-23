@@ -91,6 +91,22 @@ export type WorkOrderDetailsSummary = {
   workLogs?: any[];
   worklog_collectionref?: string;
   hasfollowupwork?: boolean;
+
+  failureClass?: string;
+  failureCode?: string;
+
+  problem?: string;
+  problemCode?: string;
+
+  cause?: string;
+  causeCode?: string;
+
+  remedy?: string;
+  remedyCode?: string;
+
+  remark?: string;
+  failureRemarks?: string;
+  remarkdesc?: string;
 };
 
 export type WorkOrderSectionCounts = {

@@ -101,6 +101,13 @@ type MaximoWorkOrderSummaryItem = {
   matusetrans?: MaximoActualMaterial[] | MaximoActualMaterial;
 
   worklog?: MaximoWorkLog[] | MaximoWorkLog;
+
+  failurecode?: string;
+  problemcode?: string;
+  causecode?: string;
+  remedycode?: string;
+  failureremarks?: string;
+  remarkdesc?: string;
 };
 
 function buildHeaders(username: string, password: string) {
@@ -179,7 +186,8 @@ export async function getWorkOrderSummary(
         'oslc.pageSize': 1,
         'oslc.select':
           'href,wonum,description,status,assetnum,asset.description,location,locationdescription,priority,siteid,workorderid,ishistory,' +
-          'scheduledstart,scheduledfinish,' +
+          'scheduledstart,scheduledfinish,targstartdate,targcompdate,targetstart,targetfinish,' +
+          'failurecode,problemcode,causecode,remedycode,failureremarks,remarkdesc,' +
           'woactivity{href,taskid,description,status,labhrs},' +
           'wplabor{taskid,laborcode,description,labhrs,regularhrs,laborhrs},' +
           'labtrans{laborcode,regularhrs,transdate},' +
@@ -248,6 +256,22 @@ if (!item) return null;
 
     isUrgent: priority === 1,
     completed: ['COMP', 'CLOSE'].includes(status.toUpperCase()),
+
+    failureClass: item.failurecode ?? '',
+    failureCode: item.failurecode ?? '',
+
+    problem: item.problemcode ?? '',
+    problemCode: item.problemcode ?? '',
+
+    cause: item.causecode ?? '',
+    causeCode: item.causecode ?? '',
+
+    remedy: item.remedycode ?? '',
+    remedyCode: item.remedycode ?? '',
+
+    remark: item.failureremarks || item.remarkdesc || '',
+    failureRemarks: item.failureremarks ?? '',
+    remarkdesc: item.remarkdesc ?? '',
 
     activities: toArray(item.woactivity).map(a => ({
       href: a.href ?? undefined,

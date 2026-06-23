@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,9 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
+  ScrollView,
+  Platform,
+  Keyboard,
 } from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import LinearGradient from 'react-native-linear-gradient';
@@ -13,7 +16,11 @@ import LinearGradient from 'react-native-linear-gradient';
 import ErrorModal from '../../../shared/components/feedback/ErrorModal';
 import { useLoginViewModel } from '../viewmodels/useLoginViewModel';
 
-export default function LoginForm() {
+type Props = {
+  scrollRef?: React.RefObject<ScrollView>;
+};
+
+export default function LoginForm({ scrollRef }: Props) {
   const {
     username,
     setUsername,
@@ -29,7 +36,11 @@ export default function LoginForm() {
   const [errorTitle, setErrorTitle] = useState('Erreur');
   const [errorMessage, setErrorMessage] = useState('');
 
+  const passwordRef = useRef<TextInput>(null);
+  const passwordWrapperRef = useRef<View>(null);
+
   const onPressLogin = useCallback(async () => {
+    Keyboard.dismiss();
     const result = await handleLogin();
 
     if (!result.ok) {
@@ -38,6 +49,20 @@ export default function LoginForm() {
       setErrorVisible(true);
     }
   }, [handleLogin]);
+
+  // Scroll vers le champ mot de passe quand il est focus (Android surtout)
+  const handlePasswordFocus = useCallback(() => {
+    if (Platform.OS === 'android' && scrollRef?.current && passwordWrapperRef.current) {
+      passwordWrapperRef.current.measureLayout(
+        // @ts-ignore
+        scrollRef.current.getInnerViewNode?.() ?? scrollRef.current,
+        (_x, y) => {
+          scrollRef.current?.scrollTo({ y: y - 16, animated: true });
+        },
+        () => {},
+      );
+    }
+  }, [scrollRef]);
 
   return (
     <>
@@ -54,6 +79,7 @@ export default function LoginForm() {
           Connectez-vous pour accéder à votre tableau de bord
         </Text>
 
+        {/* Nom d'utilisateur */}
         <View style={styles.inputWrapper}>
           <Text style={styles.label}>Nom d'utilisateur</Text>
           <View style={styles.inputContainer}>
@@ -70,11 +96,15 @@ export default function LoginForm() {
               onChangeText={setUsername}
               style={styles.textInput}
               autoCapitalize="none"
+              returnKeyType="next"
+              onSubmitEditing={() => passwordRef.current?.focus()}
+              blurOnSubmit={false}
             />
           </View>
         </View>
 
-        <View style={styles.inputWrapper}>
+        {/* Mot de passe */}
+        <View ref={passwordWrapperRef} style={styles.inputWrapper}>
           <Text style={styles.label}>Mot de passe</Text>
           <View style={styles.inputContainer}>
             <Ionicons
@@ -84,12 +114,16 @@ export default function LoginForm() {
               style={styles.inputIcon}
             />
             <TextInput
+              ref={passwordRef}
               placeholder="Mot de passe"
               placeholderTextColor="#94a3b8"
               value={password}
               onChangeText={setPassword}
               secureTextEntry={securePassword}
               style={styles.textInput}
+              returnKeyType="done"
+              onSubmitEditing={onPressLogin}
+              onFocus={handlePasswordFocus}
             />
             <TouchableOpacity
               onPress={togglePasswordVisibility}

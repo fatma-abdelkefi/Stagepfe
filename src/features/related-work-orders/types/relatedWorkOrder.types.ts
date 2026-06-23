@@ -3,7 +3,8 @@ export type RelatedWorkOrderRelation = 'FOLLOWUP' | 'RELATED';
 export type RelatedWorkOrderAIAssetStrategy =
   | 'same_asset'
   | 'related_asset'
-  | 'unknown_asset';
+  | 'unknown_asset'
+  | string;
 
 export type RelatedWorkOrderFailureContext = {
   problem?: string | null;
@@ -18,16 +19,27 @@ export type RelatedWorkOrderAssetCandidate = {
   siteid?: string;
   parent?: string;
   assettype?: string;
+  source?: string;
   score?: number;
 };
 
-export type RelatedWorkOrderAssetSelectionSource =
-  | 'related_assets_system_number'
-  | 'related_assets_equipment'
-  | 'global_asset_match'
-  | 'candidate_equipment'
-  | 'context_fallback'
-  | string;
+export type RelatedWorkOrderMLPrediction = {
+  value?: string | boolean | null;
+  confidence?: number;
+  top_predictions?: Array<{
+    value?: string | boolean | null;
+    confidence?: number;
+  }>;
+};
+
+export type RelatedWorkOrderMLResult = {
+  model_available?: boolean;
+  needed?: boolean;
+  confidence?: number;
+  assetnum?: string;
+  needed_prediction?: RelatedWorkOrderMLPrediction | null;
+  asset_prediction?: RelatedWorkOrderMLPrediction | null;
+};
 
 export type AddRelatedWorkOrderRouteParams = {
   wonum: string;
@@ -35,13 +47,13 @@ export type AddRelatedWorkOrderRouteParams = {
   description?: string | null;
   assetnum?: string | null;
   asset_description?: string | null;
+  assetDescription?: string | null;
   location?: string | null;
   worktype?: string | null;
   priority?: number | string | null;
   failure?: RelatedWorkOrderFailureContext | null;
   woHref?: string;
   mxwoDetailsHref?: string;
-
   related_assets?: RelatedWorkOrderAssetCandidate[];
   relatedAssets?: RelatedWorkOrderAssetCandidate[];
   assets?: RelatedWorkOrderAssetCandidate[];
@@ -84,7 +96,7 @@ export type RelatedWorkOrderAIResult = {
 
   confidence?: number;
   asset_match_reliable?: boolean;
-  asset_selection_source?: RelatedWorkOrderAssetSelectionSource;
+  asset_selection_source?: string;
   asset_strategy?: RelatedWorkOrderAIAssetStrategy;
   asset_reason?: string | null;
 
@@ -96,6 +108,8 @@ export type RelatedWorkOrderAIResult = {
 
   cleaned_text?: string;
   total_assets?: number;
+
+  ml_result?: RelatedWorkOrderMLResult | null;
 
   nlp_result?: any;
 };

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
+
+import { useAuth } from '../../../app/providers/AuthProvider';
 import { getWorkOrderFailureReport } from '../services/failureReportingService';
-import { getLocalFailureReport } from '../services/localFailureReportService';
 import type { WorkOrderFailureReport } from '../types/failureReporting.types';
-import { hasUsefulFailureData } from '../utils/failureFormatters';
 
 export function useWorkOrderFailureReport(wonum: string, siteid: string) {
+  const { username, password } = useAuth();
+
   const [data, setData] = useState<WorkOrderFailureReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -16,34 +18,32 @@ export function useWorkOrderFailureReport(wonum: string, siteid: string) {
       return;
     }
 
+    if (!username || !password) {
+      setData(null);
+      setError('Session expirée. Veuillez vous reconnecter.');
+      return;
+    }
+
     try {
       setLoading(true);
       setError('');
 
-      const [remoteReport, localReport] = await Promise.all([
-        getWorkOrderFailureReport(wonum, siteid).catch(() => ({ codes: [] })),
-        getLocalFailureReport(wonum, siteid),
-      ]);
+      const remoteReport = await getWorkOrderFailureReport({
+        wonum,
+        siteid,
+        username,
+        password,
+      });
 
-      if (hasUsefulFailureData(localReport)) {
-        setData({
-          ...remoteReport,
-          ...localReport,
-          codes:
-            localReport?.codes && localReport.codes.length > 0
-              ? localReport.codes
-              : remoteReport?.codes || [],
-        });
-      } else {
-        setData(remoteReport || { codes: [] });
-      }
+      setData(remoteReport || { codes: [] });
     } catch (e: any) {
+      console.log('[FAILURE REPORT DETAILS ERROR]', e);
       setError(e?.message || 'Erreur de chargement du failure report');
       setData(null);
     } finally {
       setLoading(false);
     }
-  }, [wonum, siteid]);
+  }, [wonum, siteid, username, password]);
 
   useEffect(() => {
     refresh();

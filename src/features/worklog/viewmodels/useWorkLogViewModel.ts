@@ -18,15 +18,60 @@ export const WORKLOG_TYPES: WorkLogType[] = [
   { value: 'WORK', label: 'Travail' },
 ];
 
+const MAXIMO_WORKLOG_DESCRIPTION_MAX = 100;
+
 function pad2(n: number) {
   return String(n).padStart(2, '0');
 }
 
 function getCurrentDateTimeForApi() {
   const d = new Date();
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(
-    d.getHours(),
-  )}:${pad2(d.getMinutes())}:00`;
+
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(
+    d.getDate(),
+  )}T${pad2(d.getHours())}:${pad2(d.getMinutes())}:00`;
+}
+
+function cleanTranscript(text: string) {
+  return String(text || '')
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([,.!?;:])/g, '$1')
+    .replace(/([,.!?;:])([^\s])/g, '$1 $2')
+    .replace(/\bControle\b/gi, 'Contrôle')
+    .replace(/\bcontrole\b/gi, 'contrôle')
+    .replace(/\beffectuée\b/gi, 'effectué')
+    .replace(/\bà normal\b/gi, 'anormal')
+    .replace(/\ba normal\b/gi, 'anormal')
+    .replace(/\bbruit à normal\b/gi, 'bruit anormal')
+    .replace(/\bbruit a normal\b/gi, 'bruit anormal')
+    .trim();
+}
+
+function truncateMaximoDescription(
+  text: string,
+  maxLen = MAXIMO_WORKLOG_DESCRIPTION_MAX,
+) {
+  const cleaned = cleanTranscript(text);
+
+  if (cleaned.length <= maxLen) {
+    return cleaned;
+  }
+
+  return cleaned.slice(0, maxLen).trim();
+}
+
+function buildWorkLogSummary(text: string) {
+  const cleaned = cleanTranscript(text);
+
+  if (!cleaned) return '';
+
+  const firstSentence = cleaned.split(/[.!?]/)[0]?.trim();
+
+  if (firstSentence && firstSentence.length >= 10) {
+    return truncateMaximoDescription(firstSentence);
+  }
+
+  return truncateMaximoDescription(cleaned);
 }
 
 function textToHtml(text: string) {
@@ -45,6 +90,9 @@ function htmlToPlainText(html: string) {
     .replace(/<\/p>/gi, '\n')
     .replace(/<[^>]+>/g, '')
     .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
     .trim();
 }
 
@@ -75,7 +123,9 @@ export function useWorkLogViewModel(params?: Params) {
   const [createdBy, setCreatedBy] = useState('');
   const [description, setDescription] = useState('');
   const [detailsHtml, setDetailsHtml] = useState('');
-  const [selectedType, setSelectedType] = useState<WorkLogType>(WORKLOG_TYPES[1]);
+  const [selectedType, setSelectedType] = useState<WorkLogType>(
+    WORKLOG_TYPES[1],
+  );
   const [typeOpen, setTypeOpen] = useState(false);
 
   const [saving, setSaving] = useState(false);
@@ -89,6 +139,15 @@ export function useWorkLogViewModel(params?: Params) {
   const [transcript, setTranscript] = useState('');
   const [voiceInfo, setVoiceInfo] = useState('');
   const [voiceError, setVoiceError] = useState(false);
+
+  const descriptionLength = description.length;
+
+  const descriptionTooLong =
+    descriptionLength > MAXIMO_WORKLOG_DESCRIPTION_MAX;
+
+  const descriptionLimitMessage = descriptionTooLong
+    ? `Le résumé ne doit pas dépasser ${MAXIMO_WORKLOG_DESCRIPTION_MAX} caractères.`
+    : '';
 
   const canSubmit = useMemo(
     () => !!modifyworklogUrl && !!username && !!password,
@@ -115,6 +174,7 @@ export function useWorkLogViewModel(params?: Params) {
       setRecordedFileUri('');
 
       const fileName = `worklog_${Date.now()}.m4a`;
+
       const path =
         Platform.OS === 'android'
           ? `/storage/emulated/0/Download/${fileName}`
@@ -127,10 +187,15 @@ export function useWorkLogViewModel(params?: Params) {
       });
 
       const uri = await Sound.startRecorder(path);
+
+      console.log('[WORKLOG VOICE] start uri:', uri);
+
       setRecordedFileUri(String(uri || '').trim());
       setRecording(true);
     } catch (e: any) {
       setRecording(false);
+      setVoiceError(true);
+      setVoiceInfo("Impossible de démarrer l'enregistrement.");
       showError(e?.message || "Impossible de démarrer l'enregistrement.");
     }
   };
@@ -138,29 +203,57 @@ export function useWorkLogViewModel(params?: Params) {
   const stopRecordingAndAnalyze = async () => {
     try {
       setVoiceLoading(true);
+      setVoiceError(false);
+      setVoiceInfo('');
 
       const resultUri = await Sound.stopRecorder();
+
       Sound.removeRecordBackListener();
       setRecording(false);
+
+      console.log('[WORKLOG VOICE] stop resultUri:', resultUri);
+      console.log('[WORKLOG VOICE] recordedFileUri:', recordedFileUri);
 
       const finalUri = String(resultUri || recordedFileUri || '').trim();
 
       if (!finalUri) {
+        setVoiceError(true);
+        setVoiceInfo('Fichier audio introuvable.');
         showError('Fichier audio introuvable.');
         return;
       }
 
-      const res = await transcribeAudio(finalUri, 'recording.m4a', 'audio/mp4');
+      const res = await transcribeAudio(
+        finalUri,
+        'recording.m4a',
+        'audio/mp4',
+      );
 
-      const transcriptText = String(res?.transcript || '').trim();
+      console.log('[WORKLOG VOICE] transcription response:', res);
+
+      const rawTranscript =
+        res?.corrected_transcript ||
+        res?.cleaned_text ||
+        res?.transcript ||
+        res?.raw_transcript ||
+        '';
+
+      const transcriptText = cleanTranscript(String(rawTranscript));
+
       const payload = res?.payload || {};
 
-      const autoDescription = String(payload?.description || '').trim();
-      const autoLongText = String(
-        payload?.description_longdescription?.ldtext ||
-          payload?.description_longdescription ||
-          '',
-      ).trim();
+      const rawDescription = payload?.description || '';
+
+      const rawLongDescription =
+        typeof payload?.description_longdescription === 'string'
+          ? payload.description_longdescription
+          : payload?.description_longdescription?.ldtext || '';
+
+      const autoDescription = truncateMaximoDescription(
+        String(rawDescription || ''),
+      );
+
+      const autoLongText = cleanTranscript(String(rawLongDescription || ''));
 
       setTranscript(transcriptText);
 
@@ -170,22 +263,22 @@ export function useWorkLogViewModel(params?: Params) {
         return;
       }
 
-      if (autoDescription) {
-        setDescription(autoDescription);
-      } else if (!description.trim()) {
-        setDescription(transcriptText.slice(0, 120));
-      }
+      const summary = truncateMaximoDescription(
+        autoDescription || buildWorkLogSummary(transcriptText),
+      );
 
-      if (autoLongText) {
-        setDetailsHtml(textToHtml(autoLongText));
-      } else {
-        setDetailsHtml(textToHtml(transcriptText));
-      }
+      const details = cleanTranscript(autoLongText || transcriptText);
+
+      setDescription(summary);
+      setDetailsHtml(textToHtml(details));
 
       setVoiceError(false);
       setVoiceInfo('La transcription a été effectuée avec succès.');
     } catch (e: any) {
+      console.log('[WORKLOG VOICE] error:', e);
+
       setVoiceError(true);
+      setVoiceInfo("Erreur pendant l'analyse vocale.");
       showError(e?.message || "Erreur pendant l'analyse vocale.");
     } finally {
       setVoiceLoading(false);
@@ -217,6 +310,13 @@ export function useWorkLogViewModel(params?: Params) {
 
     if (!description.trim()) {
       showError('Veuillez saisir le résumé.');
+      return;
+    }
+
+    if (descriptionTooLong) {
+      showError(
+        `Le résumé dépasse ${MAXIMO_WORKLOG_DESCRIPTION_MAX} caractères. Veuillez le raccourcir.`,
+      );
       return;
     }
 
@@ -266,6 +366,10 @@ export function useWorkLogViewModel(params?: Params) {
 
     description,
     setDescription,
+    descriptionLength,
+    descriptionTooLong,
+    descriptionLimitMessage,
+    maxDescriptionLength: MAXIMO_WORKLOG_DESCRIPTION_MAX,
 
     detailsHtml,
     setDetailsHtml,

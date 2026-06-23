@@ -17,4 +17,26 @@ export const colors = {
   warning: '#f59e0b',
 
   white: '#ffffff',
+
+  dark: {
+    background: '#0b1020',
+    surface: '#111520',
+    surfaceAlt: '#181c27',
+    border: '#1e2235',
+    borderAlt: '#252938',
+
+    primary: '#3d6aff',
+    success: '#22c55e',
+    danger: '#ef4444',
+    warning: '#facc15',
+
+    text: '#f8fafc',
+    textSub: '#8b92b0',
+    successText: '#86efac',
+    errorText: '#fca5a5',
+
+    warningBg: 'rgba(250,204,21,0.1)',
+    warningBorder: 'rgba(250,204,21,0.25)',
+    warningText: '#fde68a',
+  },
 };

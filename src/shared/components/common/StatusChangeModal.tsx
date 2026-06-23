@@ -65,6 +65,46 @@ function getStatusText(item: any): string {
   ).trim();
 }
 
+function normalizeStatusLabelFR(code: string, text: string): string {
+  const value = String(text || code || '').trim().toUpperCase();
+
+  const translations: Record<string, string> = {
+    // Work Order
+    WAPPR: 'En attente d’approbation',
+    APPR: 'Approuvé',
+    WSCH: 'En attente de planification',
+    WMATL: 'En attente de matériel',
+    WPMATL: 'En attente de matériel',
+    WPCOND: 'En attente de condition',
+    HISTEDIT: 'Historique modifié',
+    INPRG: 'En cours',
+    COMP: 'Terminé',
+    CLOSE: 'Clôturé',
+    CAN: 'Annulé',
+
+    // Activity / Task
+    PNDREV: 'En attente de révision',
+    STARTED: 'Démarré',
+    FINISHED: 'Terminé',
+
+    // Textes anglais possibles
+    'WAITING ON APPROVAL': 'En attente d’approbation',
+    APPROVED: 'Approuvé',
+    'WAITING TO BE SCHEDULED': 'En attente de planification',
+    'WAITING FOR MATERIAL': 'En attente de matériel',
+    'WAITING FOR PLANT CONDITION': 'En attente de condition',
+    'HISTORY EDIT': 'Historique modifié',
+    'HISTORICAL EDIT': 'Historique modifié',
+    'IN PROGRESS': 'En cours',
+    COMPLETED: 'Terminé',
+    CLOSED: 'Clôturé',
+    CANCELED: 'Annulé',
+    CANCELLED: 'Annulé',
+  };
+
+  return translations[value] || getFrenchStatusLabel(code) || text || code;
+}
+
 export default function StatusChangeModal({
   visible,
   entityType,
@@ -307,10 +347,18 @@ export default function StatusChangeModal({
               >
                 {statuses.map((item: any, index: number) => {
                   const code = getStatusCode(item);
+                  const rawText = getStatusText(item);
+
+                  const fixedLabels: Record<string, string> = {
+                    HISTEDIT: 'Historique modifié',
+                    WPCOND: 'En attente de condition',
+                    WPMATL: 'En attente de matériel',
+                    WMATL: 'En attente de matériel',
+                  };
+
                   const label =
-                    getStatusText(item) ||
-                    getFrenchStatusLabel(code) ||
-                    code ||
+                    fixedLabels[code] ||
+                    normalizeStatusLabelFR(code, rawText) ||
                     `Statut ${index + 1}`;
 
                   const selected = code === selectedCode;

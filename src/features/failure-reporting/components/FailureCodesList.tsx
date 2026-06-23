@@ -1,123 +1,102 @@
+// src/features/failure-reporting/components/FailureCodesList.tsx
+
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import FeatherIcon from 'react-native-vector-icons/Feather';
-import Card from '../../../shared/components/layout/Card';
-import SectionLabel from '../../../shared/components/forms/SectionLabel';
-import { colors } from '../../../shared/theme/colors';
-import type { FailureCodeRow } from '../types/failureReporting.types';
-import { getFailureTypeLabel } from '../utils/failureFormatters';
+
+import type {
+  FailureCodeRow,
+  FailureCodeType,
+} from '../types/failureReporting.types';
 
 type Props = {
   title?: string;
-  rows: FailureCodeRow[];
+  rows?: FailureCodeRow[];
 };
-
-type BadgeVariant = 'problem' | 'cause' | 'remedy';
 
 const C = {
   surface: '#111520',
   surfaceAlt: '#181c27',
   border: '#1e2235',
   borderAlt: '#252938',
-  accent: colors.primary,
-  text: '#000000',
-  textSub: '#000000',
-  textMuted: '#4b5272',
-
-  problemBg: 'rgba(59,130,246,0.12)',
-  problemBorder: 'rgba(59,130,246,0.28)',
-  problemText: '#93c5fd',
-
-  causeBg: 'rgba(245,158,11,0.10)',
-  causeBorder: 'rgba(245,158,11,0.28)',
-  causeText: '#fcd34d',
-
-  remedyBg: 'rgba(16,185,129,0.12)',
-  remedyBorder: 'rgba(16,185,129,0.28)',
-  remedyText: '#86efac',
+  accent: '#3d6aff',
+  text: '#f8fafc',
+  textSub: '#9ca3af',
+  muted: '#6b7280',
+  green: '#22c55e',
+  orange: '#f59e0b',
+  blue: '#3b82f6',
 };
 
-const BADGE: Record<
-  BadgeVariant,
-  { icon: string; bg: string; border: string; text: string }
-> = {
-  problem: {
-    icon: 'alert-circle',
-    bg: C.problemBg,
-    border: C.problemBorder,
-    text: C.problemText,
-  },
-  cause: {
-    icon: 'search',
-    bg: C.causeBg,
-    border: C.causeBorder,
-    text: C.causeText,
-  },
-  remedy: {
-    icon: 'tool',
-    bg: C.remedyBg,
-    border: C.remedyBorder,
-    text: C.remedyText,
-  },
-};
+function safeTrim(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : String(value ?? '').trim();
+}
 
-function getVariant(type: FailureCodeRow['type']): BadgeVariant {
-  if (type === 'PROBLEM') return 'problem';
-  if (type === 'CAUSE') return 'cause';
-  return 'remedy';
+function getTypeLabel(type: FailureCodeType): string {
+  if (type === 'PROBLEM') return 'Problème';
+  if (type === 'CAUSE') return 'Cause';
+  if (type === 'REMEDY') return 'Remède';
+  return 'Code';
+}
+
+function getTypeColor(type: FailureCodeType): string {
+  if (type === 'PROBLEM') return C.orange;
+  if (type === 'CAUSE') return C.blue;
+  if (type === 'REMEDY') return C.green;
+  return C.accent;
+}
+
+function getTypeIcon(type: FailureCodeType): string {
+  if (type === 'PROBLEM') return 'alert-triangle';
+  if (type === 'CAUSE') return 'search';
+  if (type === 'REMEDY') return 'tool';
+  return 'tag';
 }
 
 export default function FailureCodesList({
   title = 'Codes de panne',
-  rows,
+  rows = [],
 }: Props) {
+  const safeRows = Array.isArray(rows) ? rows : [];
+
   return (
-    <Card style={styles.card}>
-      <SectionLabel icon="tag" title={title} />
+    <View style={styles.card}>
+      <View style={styles.header}>
+        <FeatherIcon name="list" size={17} color={C.accent} />
+        <Text style={styles.title}>{title}</Text>
+      </View>
 
-      {!rows.length ? (
-        <View style={styles.empty}>
-          <FeatherIcon name="inbox" size={26} color={C.textMuted} />
-          <Text style={styles.emptyText}>Aucun code failure trouvé.</Text>
-        </View>
+      {safeRows.length === 0 ? (
+        <Text style={styles.emptyText}>Aucun code disponible.</Text>
       ) : (
-        <View style={styles.list}>
-          {rows.map((row, index) => {
-            const variant = BADGE[getVariant(row.type)];
+        safeRows.map((row, index) => {
+          const type = row?.type;
+          const code = safeTrim(row?.code);
+          const description = safeTrim(row?.description);
+          const color = getTypeColor(type);
 
-            return (
-              <View key={`${row.type}-${row.code}-${index}`} style={styles.item}>
-                <View
-                  style={[
-                    styles.typeBadge,
-                    {
-                      backgroundColor: variant.bg,
-                      borderColor: variant.border,
-                    },
-                  ]}
-                >
-                  <FeatherIcon
-                    name={variant.icon as any}
-                    size={11}
-                    color={variant.text}
-                  />
-                  <Text style={[styles.typeBadgeText, { color: variant.text }]}>
-                    {getFailureTypeLabel(row.type)}
-                  </Text>
-                </View>
-
-                <View style={styles.itemContent}>
-                  <Text style={styles.code}>{row.code || '—'}</Text>
-                  {!!row.description && (
-                    <Text style={styles.description}>{row.description}</Text>
-                  )}
-                </View>
+          return (
+            <View key={`${type}-${code}-${index}`} style={styles.row}>
+              <View style={[styles.iconBox, { borderColor: color }]}>
+                <FeatherIcon name={getTypeIcon(type)} size={15} color={color} />
               </View>
-            );
-          })}
-        </View>
+
+              <View style={styles.rowContent}>
+                <Text style={[styles.typeText, { color }]}>
+                  {getTypeLabel(type)}
+                </Text>
+
+                <Text style={styles.codeText}>{code || '—'}</Text>
+
+                {description ? (
+                  <Text style={styles.descriptionText}>{description}</Text>
+                ) : null}
+              </View>
+            </View>
+          );
+        })
       )}
-    </Card>
+    </View>
   );
 }
 
@@ -128,55 +107,71 @@ const styles = StyleSheet.create({
     padding: 16,
     borderWidth: 1,
     borderColor: C.border,
+    marginTop: 14,
   },
-  empty: {
+
+  header: {
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 24,
     gap: 8,
-    marginTop: 8,
+    marginBottom: 12,
   },
+
+  title: {
+    color: C.text,
+    fontSize: 15,
+    fontWeight: '900',
+  },
+
   emptyText: {
-    color: C.textMuted,
+    color: C.textSub,
     fontSize: 13,
     fontWeight: '600',
   },
-  list: {
-    gap: 10,
-    marginTop: 12,
-  },
-  item: {
+
+  row: {
+    flexDirection: 'row',
+    gap: 12,
     backgroundColor: C.surfaceAlt,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: C.borderAlt,
-    borderRadius: 12,
     padding: 12,
-  },
-  typeBadge: {
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 9,
-    paddingVertical: 4,
     marginBottom: 10,
   },
-  typeBadgeText: {
+
+  iconBox: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#0f172a',
+  },
+
+  rowContent: {
+    flex: 1,
+  },
+
+  typeText: {
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    marginBottom: 3,
   },
-  itemContent: {
-    gap: 4,
-  },
-  code: {
-    fontSize: 14,
-    fontWeight: '700',
+
+  codeText: {
     color: C.text,
+    fontSize: 14,
+    fontWeight: '900',
   },
-  description: {
-    fontSize: 13,
+
+  descriptionText: {
+    marginTop: 3,
     color: C.textSub,
-    lineHeight: 18,
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 17,
   },
 });

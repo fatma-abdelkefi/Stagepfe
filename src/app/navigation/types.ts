@@ -1,12 +1,25 @@
 export type RootStackParamList = {
   Login: undefined;
+  AddWorkOrder: undefined;
 
   WorkOrders: { showPermissionsModal?: boolean } | undefined;
 
   WorkOrderDetails: {
-    workOrder: any;
+  workOrder?: {
+    wonum?: string;
+    siteid?: string;
+    status?: string;
+    href?: string;
+    description?: string;
+    workorderid?: number;
   };
 
+  wonum?: string;
+  siteid?: string;
+  createdFromAdd?: boolean;
+  shouldRefreshWorkOrders?: boolean;
+  draftWorkOrder?: any;
+};
   MaterialsList: {
     title: string;
     wonum: string;
@@ -32,8 +45,21 @@ export type RootStackParamList = {
     wonum: string;
     siteid?: string;
     description?: string | null;
+
     assetnum?: string | null;
+    asset_description?: string | null;
+    assetDescription?: string | null;
+
     location?: string | null;
+    worktype?: string | null;
+    priority?: number | string | null;
+
+    woHref?: string;
+    mxwoDetailsHref?: string;
+
+    related_assets?: any[];
+    relatedAssets?: any[];
+    assets?: any[];
   };
 
   AddPlannedLabor: {
@@ -124,6 +150,10 @@ export type RootStackParamList = {
     locationDescription?: string;
     status?: string;
     worklogText?: string;
+    href?: string;
+    woHref?: string;
+    priority?: number;
+    description_longdescription?: string;
   };
 
   FailureReportingDetails: {

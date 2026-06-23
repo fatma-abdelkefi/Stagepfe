@@ -105,7 +105,7 @@ export default function ActivityListScreen() {
     const locked = isClosedStatus(statusCode);
 
     const metaParts = [
-      item.taskid ? `Task: ${item.taskid}` : '',
+      item.taskid ? `tâche: ${item.taskid}` : '',
       item.asset ? `Asset: ${item.asset}` : '',
       item.location ? `Location: ${item.location}` : '',
     ].filter(Boolean);

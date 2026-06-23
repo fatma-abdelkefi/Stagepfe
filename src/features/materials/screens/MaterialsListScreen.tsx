@@ -10,6 +10,22 @@ type Props = {
   route: RouteProp<RootStackParamList, 'MaterialsList'>;
 };
 
+function getMaterialLocation(item: any): string {
+  return String(
+    item?.storeloc ||
+      item?.storeroom ||
+      item?.location ||
+      item?.locationnum ||
+      item?.binnum ||
+      item?.assetloc ||
+      item?.invreserve?.storeloc ||
+      item?.invreserve?.location ||
+      item?.wpitem?.storeloc ||
+      item?.wpitem?.location ||
+      '',
+  ).trim();
+}
+
 export default function MaterialsListScreen({ route }: Props) {
   const navigation = useNavigation<any>();
   const { title, wonum, items, mode } = route.params;
@@ -23,7 +39,7 @@ export default function MaterialsListScreen({ route }: Props) {
         mode === 'actual'
           ? Number(item.itemqty ?? item.quantity ?? 0)
           : Number(item.quantity ?? item.itemqty ?? 0),
-      location: item.location ?? '',
+      location: getMaterialLocation(item),
       storeroom: item.storeroom ?? '',
       storeloc: item.storeloc ?? '',
       siteid: item.siteid ?? '',
@@ -72,9 +88,15 @@ export default function MaterialsListScreen({ route }: Props) {
                   : [
                       { label: "Numéro d'article", value: item.itemnum || '—' },
                       { label: 'Quantité', value: item.quantity || '—' },
-                      { label: 'Magasin', value: item.storeroom || '—' },
+                      {
+                        label: 'Magasin',
+                        value:
+                          item.storeroom ||
+                          item.storeloc ||
+                          item.location ||
+                          '—',
+                      },
                       { label: 'Type de sortie', value: item.issuetype || '—' },
-                      { label: 'Site', value: item.siteid || '—' },
                       {
                         label: 'Code à barre',
                         value: item.barcode || 'Aucun code à barre',
